@@ -1,5 +1,5 @@
 import { FIXED_STEP_MS, PLAYER, TILE_SIZE } from '../src/config';
-import { Player, type PlayerInput } from '../src/objects/Player';
+import { DEFAULT_TUNING, Player, type PlayerInput, type PlayerTuning } from '../src/objects/Player';
 import { boxesOverlap, insetBox, type Box } from '../src/systems/CollisionSystem';
 import type { Room } from '../src/world/Room';
 import type { Direction } from '../src/world/roomTypes';
@@ -15,7 +15,20 @@ import type { Direction } from '../src/world/roomTypes';
  * The model is deliberately optimistic - it ignores enemies, and every attempt
  * starts with the crumbling floors intact - so anything it calls unreachable is
  * unreachable for certain, and there are no flaky failures.
+ *
+ * Optimism cuts both ways, though. Simulating a perfect player proves only that
+ * a route exists, not that anyone could follow it: a landing that works from one
+ * launch pixel, for one frame, counts as "reachable" and is not. So the tests
+ * also run the house for a CLUMSY player, who jumps and walks slightly less far.
+ * Anything that survives that has real margin in it.
  */
+
+/** A player who is a few per cent worse at everything. */
+export const CLUMSY_TUNING: PlayerTuning = {
+  walkSpeed: DEFAULT_TUNING.walkSpeed * 0.95,
+  jumpVelocity: DEFAULT_TUNING.jumpVelocity * 0.95,
+  gravity: DEFAULT_TUNING.gravity,
+};
 
 const STEP = FIXED_STEP_MS / 1000;
 
@@ -78,10 +91,11 @@ function attempt(
   from: Spot,
   input: PlayerInput,
   targets: { id: string; box: Box }[],
+  tuning: PlayerTuning,
 ): Attempt {
   room.reset();
 
-  const player = new Player();
+  const player = new Player(tuning);
   player.placeAt(from.x, from.y);
 
   const landings: Spot[] = [];
@@ -114,7 +128,7 @@ function attempt(
 }
 
 /** Drops the player from a spawn point and returns where they come to rest. */
-function settle(room: Room, spawn: Spot): Spot[] {
+function settle(room: Room, spawn: Spot, tuning: PlayerTuning): Spot[] {
   const landings: Spot[] = [];
   for (const input of [
     { left: false, right: false, jump: false },
@@ -122,7 +136,7 @@ function settle(room: Room, spawn: Spot): Spot[] {
     { left: false, right: true, jump: false },
   ]) {
     room.reset();
-    const player = new Player();
+    const player = new Player(tuning);
     player.placeAt(spawn.x, spawn.y);
     for (let i = 0; i < MAX_STEPS; i++) {
       const result = player.step(input, STEP, room);
@@ -140,7 +154,11 @@ function settle(room: Room, spawn: Spot): Spot[] {
  * separately matters: a room can be perfectly navigable when you drop into it
  * through the ceiling and a one-way trap when you walk in from the side.
  */
-export function explore(room: Room, from?: readonly string[]): Reachability {
+export function explore(
+  room: Room,
+  from?: readonly string[],
+  tuning: PlayerTuning = DEFAULT_TUNING,
+): Reachability {
   const targets = itemBoxes(room);
   const found: Reachability = {
     spots: new Set(),
@@ -164,7 +182,7 @@ export function explore(room: Room, from?: readonly string[]): Reachability {
     ([key]) => from === undefined || from.includes(key),
   );
   for (const [, spawn] of starts) {
-    for (const landing of settle(room, spawn)) push(landing);
+    for (const landing of settle(room, spawn, tuning)) push(landing);
   }
 
   while (queue.length > 0) {
@@ -177,7 +195,7 @@ export function explore(room: Room, from?: readonly string[]): Reachability {
     }
 
     for (const input of MOVES) {
-      const result = attempt(room, from, input, targets);
+      const result = attempt(room, from, input, targets, tuning);
       for (const id of result.items) found.items.add(id);
       if (result.exit !== null) found.exits.add(result.exit);
       for (const landing of result.landings) push(landing);

@@ -26,6 +26,25 @@ export interface PlayerInput {
   jump: boolean;
 }
 
+/**
+ * The three numbers that decide how far the player can get.
+ *
+ * Injectable so the reachability tests can run the house again for a slightly
+ * worse player. A room that only works at full ability is a room that only
+ * works in theory.
+ */
+export interface PlayerTuning {
+  walkSpeed: number;
+  jumpVelocity: number;
+  gravity: number;
+}
+
+export const DEFAULT_TUNING: PlayerTuning = {
+  walkSpeed: PLAYER.walkSpeed,
+  jumpVelocity: PLAYER.jumpVelocity,
+  gravity: PLAYER.gravity,
+};
+
 export type DeathCause = 'hazard' | 'fall' | 'enemy';
 
 export interface StepResult {
@@ -57,6 +76,8 @@ export class Player {
   private jumpBufferMs = 0;
   private jumpWasHeld = false;
   private animMs = 0;
+
+  constructor(private readonly tuning: PlayerTuning = DEFAULT_TUNING) {}
 
   get box(): Box {
     return { x: this.x, y: this.y, width: PLAYER.width, height: PLAYER.height };
@@ -104,7 +125,7 @@ export class Player {
 
     const direction = (input.right ? 1 : 0) - (input.left ? 1 : 0);
     if (PLAYER.airControl || this.onGround) {
-      this.vx = direction * PLAYER.walkSpeed;
+      this.vx = direction * this.tuning.walkSpeed;
     }
     if (direction !== 0) this.facing = direction as -1 | 1;
 
@@ -124,14 +145,14 @@ export class Player {
     // --- jump -----------------------------------------------------------
     const mayJump = this.onGround || this.coyoteMs > 0;
     if (mayJump && this.jumpBufferMs > 0) {
-      this.vy = -PLAYER.jumpVelocity;
+      this.vy = -this.tuning.jumpVelocity;
       this.onGround = false;
       this.coyoteMs = 0;
       this.jumpBufferMs = 0;
       this.fallDistance = 0;
       result.jumped = true;
     } else {
-      this.vy = Math.min(PLAYER.maxFallSpeed, this.vy + PLAYER.gravity * dtSeconds);
+      this.vy = Math.min(PLAYER.maxFallSpeed, this.vy + this.tuning.gravity * dtSeconds);
     }
 
     // --- movement -------------------------------------------------------
@@ -187,10 +208,21 @@ export class Player {
     return result;
   }
 
+  /**
+   * Going up is the odd one out.
+   *
+   * Walking off the side or falling out of the bottom carries you further in
+   * that direction whatever happens, so those only count once you are entirely
+   * outside the room. A jump does not: it slows to a stop and comes back. Asking
+   * for the whole 16-pixel body to clear the ceiling means the exit only opens
+   * at the very top of the arc, for a fraction of a step, which turns a doorway
+   * into a trick. Half the body through the gap is unambiguous, still cannot
+   * happen by accident, and leaves the jump room to spare.
+   */
   private boundaryCrossed(): Direction | null {
     if (this.x + PLAYER.width <= 0) return 'left';
     if (this.x >= PLAY_WIDTH) return 'right';
-    if (this.y + PLAYER.height <= 0) return 'up';
+    if (this.y + PLAYER.height / 2 <= 0) return 'up';
     if (this.y >= PLAY_HEIGHT) return 'down';
     return null;
   }

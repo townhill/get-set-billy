@@ -114,6 +114,12 @@ Notes on how it feels, all of which are deliberate:
   carries you down into the room below keeps counting.
 - `R` costs a life on purpose: it is the way out of a spot you cannot escape,
   not a free retry.
+- **Leaving through the ceiling** counts once half the player is through the
+  gap, rather than all of them. Walking off the side or falling out of the
+  bottom carries you onward whatever happens, so those wait until you are
+  entirely outside; a jump does not, and demanding the whole body clear the
+  ceiling would only open the exit at the very top of the arc, for a fraction of
+  a step. That is a trick, not a doorway.
 
 ---
 
@@ -174,7 +180,7 @@ src/
 Phaser draws things and runs the loop. It does not decide anything.
 
 All the rules — movement, collision, enemy paths, room structure, game state,
-saving — live in modules that import no Phaser at all. That is why 291 tests can
+saving — live in modules that import no Phaser at all. That is why 330 tests can
 run in a plain Node environment with no canvas and no WebGL, and it is why
 `GameScene` is mostly sequencing rather than logic.
 
@@ -231,9 +237,17 @@ It is deliberately optimistic — no enemies, and every attempt starts with the
 crumbling floors intact — so anything it calls unreachable really is
 unreachable, and it never fails at random.
 
-It exists because six rooms passed every structural check and were still
-impossible. Reasoning about geometry is not enough; only simulating the jump
-tells you whether the jump works.
+Optimism cuts both ways, though. A perfect simulated player proves only that a
+route _exists_, not that anybody could follow it: a landing that works from one
+launch pixel for one frame counts as reachable, and is not. So every room is
+explored twice, the second time by a **clumsy player** who jumps and walks five
+per cent less far. Only what survives that has real margin in it, and that
+second pass is what stops a knife-edge route passing for a staircase.
+
+It exists because rooms kept passing every structural check while being
+impossible to play. Reasoning about geometry is not enough; only simulating the
+jump tells you whether the jump works, and only simulating a worse jump tells
+you whether it works reliably.
 
 ### Enemies
 
@@ -437,9 +451,13 @@ and `x: 246` on the right.
 the room looks fine. A jump only reaches its full height if there is nothing
 above the player's head. Standing on a ledge at row 4 with a solid ceiling at
 row 0, the player's head hits that ceiling after eight pixels, and their feet
-get no higher than the top of row 3 — so a ledge at row 2 is unreachable, no
-matter how close it looks. Under a solid ceiling, **row 3 is the highest ledge
-you can land on**.
+get no higher than the top of row 3.
+
+So a ledge at row 2 is unreachable, however close it looks. And a ledge at row 3
+is _worse than unreachable_: the feet arrive at exactly its surface, so it can
+be landed on for one simulation step, from one launch position, if everything
+lines up. It looks possible, plays as impossible, and passes a naive check.
+**Under a solid ceiling, row 4 is the highest ledge worth putting anywhere.**
 
 **Rooms with an `up` exit** have a shape that works, and it is worth copying:
 
@@ -529,17 +547,18 @@ room. A broken room fails the build.
 npm test
 ```
 
-291 tests, in a plain Node environment — no browser, no canvas, no Phaser.
+330 tests, in a plain Node environment — no browser, no canvas, no Phaser.
 
-| File                      | Covers                                                                                               |
-| ------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `tests/collision.test.ts` | Sweeps, one-way platforms, hazard rectangles, tunnelling                                             |
-| `tests/player.test.ts`    | Walking, jump height, coyote time, jump buffer, fatal falls, conveyors, crumbling floors, room edges |
-| `tests/enemy.test.ts`     | Each movement type, its bounds, its period, and its determinism                                      |
-| `tests/rooms.test.ts`     | The whole house: structure, connectivity, spawns, items, enemies                                     |
-| `tests/gamestate.test.ts` | Collecting, lives, win condition, snapshots, the clock                                               |
-| `tests/save.test.ts`      | Round trips, corrupt saves, no storage, storage that throws                                          |
-| `tests/font.test.ts`      | Every glyph and every piece of artwork is the size it claims                                         |
+| File                         | Covers                                                                                                                                                                  |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/collision.test.ts`    | Sweeps, one-way platforms, hazard rectangles, tunnelling                                                                                                                |
+| `tests/player.test.ts`       | Walking, jump height, coyote time, jump buffer, fatal falls, conveyors, crumbling floors, room edges                                                                    |
+| `tests/enemy.test.ts`        | Each movement type, its bounds, its period, and its determinism                                                                                                         |
+| `tests/rooms.test.ts`        | The whole house: structure, connectivity, spawns, items, enemies                                                                                                        |
+| `tests/reachability.test.ts` | Whether the house is actually _playable_: the real movement model run from every doorway, at full ability and again for a player who cannot quite manage a perfect jump |
+| `tests/gamestate.test.ts`    | Collecting, lives, win condition, snapshots, the clock                                                                                                                  |
+| `tests/save.test.ts`         | Round trips, corrupt saves, no storage, storage that throws                                                                                                             |
+| `tests/font.test.ts`         | Every glyph and every piece of artwork is the size it claims                                                                                                            |
 
 The tests are there to catch real mistakes — a room you cannot get out of, a
 jump that no longer reaches, a save that crashes the title screen — not to
