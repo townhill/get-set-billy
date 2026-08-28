@@ -286,13 +286,18 @@ Continue can never drop you into a run you cannot survive.
 
 ### Graphics
 
-There is not a single image file in this project.
+There is not a single binary image file in this project.
 
 Sprites are written as arrays of strings in `src/assets/`, one character per
 pixel, using single-letter palette keys — so a bowler hat is legible as text in
 the source. At boot, `render/textures.ts` plots them into canvases and hands
 them to Phaser as textures. The 5×7 typeface in `assets/font.ts` is drawn the
 same way, as slash-separated binary strings.
+
+The one file on disk is `public/favicon.svg`, and that is pixel art too: a 16×16
+grid of `<rect>` elements with `shape-rendering="crispEdges"`, showing the
+player's head in its nightcap. It scales up crisply to whatever size a browser
+asks for, and it is still just text you can edit.
 
 Each room's fixed scenery is painted once into a single 256×160 texture. Only
 the parts that animate — conveyors, crumbling floors, liquid — are separate
@@ -568,7 +573,7 @@ whole house at startup and logs anything wrong to the console.
 ## What is not in here
 
 No React, no Vue, no backend, no database, no authentication, no cloud services,
-no ECS framework, and no third-party artwork, fonts or audio. Phaser draws
-things; the rest is a few thousand lines of plain TypeScript.
+no ECS framework, and no third-party artwork, fonts or audio. Not one PNG.
+Phaser draws things; the rest is a few thousand lines of plain TypeScript.
 
 # get-set-billy

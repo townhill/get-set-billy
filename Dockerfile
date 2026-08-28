@@ -16,6 +16,7 @@ RUN npm ci
 
 COPY tsconfig.json vite.config.ts index.html ./
 COPY src ./src
+COPY public ./public
 
 # `npm run build` type-checks before it bundles, so a type error fails the image.
 RUN npm run build
