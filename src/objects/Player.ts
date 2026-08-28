@@ -1,0 +1,221 @@
+import { PLAY_HEIGHT, PLAY_WIDTH, PLAYER, TILE_SIZE, WORLD } from '../config';
+import {
+  type Box,
+  insetBox,
+  moveBox,
+  overlapsHazard,
+  supportColumns,
+} from '../systems/CollisionSystem';
+import type { Room } from '../world/Room';
+import type { Direction } from '../world/roomTypes';
+
+/**
+ * The player's movement model.
+ *
+ * Deliberately unlike a physics engine: horizontal speed is set, not
+ * accelerated; jumps are a fixed height; nothing bounces or slides. The only
+ * concessions to the present day are a few frames of coyote time and a jump
+ * buffer, which cost nothing in predictability and save a great deal of swearing.
+ *
+ * Knows nothing about Phaser, so the whole thing can be stepped in a test.
+ */
+
+export interface PlayerInput {
+  left: boolean;
+  right: boolean;
+  jump: boolean;
+}
+
+export type DeathCause = 'hazard' | 'fall' | 'enemy';
+
+export interface StepResult {
+  /** Set when the player has walked or fallen out of the room. */
+  leftRoom: Direction | null;
+  /** Set when the player died this step. */
+  died: DeathCause | null;
+  /** True on the step the player touched down. */
+  landed: boolean;
+  /** True on the step a jump started. */
+  jumped: boolean;
+  /** How many crumbling floors finished collapsing this step. */
+  floorsCollapsed: number;
+}
+
+export type PlayerPose = 'stand' | 'walk' | 'jump' | 'fall';
+
+export class Player {
+  x = 0;
+  y = 0;
+  vx = 0;
+  vy = 0;
+  facing: -1 | 1 = 1;
+  onGround = false;
+  /** How far the player has dropped since last being supported, in pixels. */
+  fallDistance = 0;
+
+  private coyoteMs = 0;
+  private jumpBufferMs = 0;
+  private jumpWasHeld = false;
+  private animMs = 0;
+
+  get box(): Box {
+    return { x: this.x, y: this.y, width: PLAYER.width, height: PLAYER.height };
+  }
+
+  get pose(): PlayerPose {
+    if (!this.onGround) return this.vy < 0 ? 'jump' : 'fall';
+    return this.vx === 0 ? 'stand' : 'walk';
+  }
+
+  /** Frame index for the walk cycle, which only advances while actually walking. */
+  get animFrame(): number {
+    return Math.floor(this.animMs / PLAYER.animFrameMs) % 4;
+  }
+
+  /** Drops the player at a position, optionally keeping a fall in progress. */
+  placeAt(x: number, y: number, vy = 0, fallDistance = 0): void {
+    this.x = x;
+    this.y = y;
+    this.vx = 0;
+    this.vy = vy;
+    this.onGround = false;
+    this.fallDistance = fallDistance;
+    this.coyoteMs = 0;
+    this.jumpBufferMs = 0;
+    this.jumpWasHeld = true; // a held jump button must be released before it fires again
+    this.animMs = 0;
+  }
+
+  /** Advances the player by exactly one fixed simulation step. */
+  step(input: PlayerInput, dtSeconds: number, room: Room): StepResult {
+    const dtMs = dtSeconds * 1000;
+    const result: StepResult = {
+      leftRoom: null,
+      died: null,
+      landed: false,
+      jumped: false,
+      floorsCollapsed: room.updateCrumbling(dtMs).length,
+    };
+
+    // --- intent ---------------------------------------------------------
+    if (input.jump && !this.jumpWasHeld) this.jumpBufferMs = PLAYER.jumpBufferMs;
+    this.jumpWasHeld = input.jump;
+    this.jumpBufferMs = Math.max(0, this.jumpBufferMs - dtMs);
+
+    const direction = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+    if (PLAYER.airControl || this.onGround) {
+      this.vx = direction * PLAYER.walkSpeed;
+    }
+    if (direction !== 0) this.facing = direction as -1 | 1;
+
+    // --- conveyors ------------------------------------------------------
+    let drift = 0;
+    if (this.onGround) {
+      const groundRow = Math.floor((this.y + PLAYER.height) / TILE_SIZE);
+      for (const col of supportColumns(this.box, groundRow)) {
+        const push = room.conveyorAt(col, groundRow);
+        if (push !== 0) {
+          drift = push * WORLD.conveyorSpeed;
+          break;
+        }
+      }
+    }
+
+    // --- jump -----------------------------------------------------------
+    const mayJump = this.onGround || this.coyoteMs > 0;
+    if (mayJump && this.jumpBufferMs > 0) {
+      this.vy = -PLAYER.jumpVelocity;
+      this.onGround = false;
+      this.coyoteMs = 0;
+      this.jumpBufferMs = 0;
+      this.fallDistance = 0;
+      result.jumped = true;
+    } else {
+      this.vy = Math.min(PLAYER.maxFallSpeed, this.vy + PLAYER.gravity * dtSeconds);
+    }
+
+    // --- movement -------------------------------------------------------
+    const previousY = this.y;
+    const wasOnGround = this.onGround;
+    const moved = moveBox(this.box, (this.vx + drift) * dtSeconds, this.vy * dtSeconds, room);
+
+    this.x = moved.x;
+    this.y = moved.y;
+
+    if (moved.hitCeiling) this.vy = 0;
+
+    const droppedBy = this.y - previousY;
+    if (!moved.onGround && droppedBy > 0) this.fallDistance += droppedBy;
+
+    if (moved.onGround) {
+      this.vy = 0;
+      this.coyoteMs = PLAYER.coyoteTimeMs;
+      if (!wasOnGround) result.landed = true;
+      // Anything crumbling underfoot starts to go.
+      for (const col of supportColumns(this.box, moved.groundRow)) {
+        room.standOn(col, moved.groundRow);
+      }
+    } else {
+      this.coyoteMs = Math.max(0, this.coyoteMs - dtMs);
+    }
+    this.onGround = moved.onGround;
+
+    // --- animation ------------------------------------------------------
+    if (this.onGround && this.vx !== 0) {
+      this.animMs += dtMs;
+    } else if (this.vx === 0) {
+      this.animMs = 0;
+    }
+
+    // --- leaving the room ------------------------------------------------
+    const exiting = this.boundaryCrossed();
+    if (exiting !== null && room.exit(exiting) !== undefined) {
+      result.leftRoom = exiting;
+      return result;
+    }
+    this.keepInsideSealedEdges(room);
+
+    // --- dying ------------------------------------------------------------
+    if (result.landed && this.fallDistance > PLAYER.fatalFallDistance) {
+      result.died = 'fall';
+    } else if (overlapsHazard(insetBox(this.box, PLAYER.hazardInset), room)) {
+      result.died = 'hazard';
+    }
+
+    if (result.landed) this.fallDistance = 0;
+
+    return result;
+  }
+
+  private boundaryCrossed(): Direction | null {
+    if (this.x + PLAYER.width <= 0) return 'left';
+    if (this.x >= PLAY_WIDTH) return 'right';
+    if (this.y + PLAYER.height <= 0) return 'up';
+    if (this.y >= PLAY_HEIGHT) return 'down';
+    return null;
+  }
+
+  /**
+   * A room with no exit in some direction is sealed that way. Room geometry
+   * normally makes this impossible, but clamping here means a mistake in the
+   * data can never let the player wander off the screen and disappear.
+   */
+  private keepInsideSealedEdges(room: Room): void {
+    if (this.x < 0 && room.exit('left') === undefined) {
+      this.x = 0;
+      this.vx = 0;
+    }
+    if (this.x + PLAYER.width > PLAY_WIDTH && room.exit('right') === undefined) {
+      this.x = PLAY_WIDTH - PLAYER.width;
+      this.vx = 0;
+    }
+    if (this.y < 0 && room.exit('up') === undefined) {
+      this.y = 0;
+      this.vy = 0;
+    }
+    if (this.y + PLAYER.height > PLAY_HEIGHT && room.exit('down') === undefined) {
+      this.y = PLAY_HEIGHT - PLAYER.height;
+      this.vy = 0;
+    }
+  }
+}

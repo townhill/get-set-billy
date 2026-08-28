@@ -1,0 +1,24 @@
+# Never send these to the build context: the image builds from source only.
+node_modules
+dist
+coverage
+.git
+.gitignore
+.github
+.claude
+.vscode
+.idea
+*.log
+.DS_Store
+
+# Nothing below is needed to build or serve the game.
+README.md
+LICENSE
+docker-compose.yml
+Dockerfile
+.dockerignore
+eslint.config.js
+vitest.config.ts
+.prettierrc.json
+.prettierignore
+tests

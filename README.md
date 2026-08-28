@@ -174,7 +174,7 @@ src/
 Phaser draws things and runs the loop. It does not decide anything.
 
 All the rules — movement, collision, enemy paths, room structure, game state,
-saving — live in modules that import no Phaser at all. That is why 251 tests can
+saving — live in modules that import no Phaser at all. That is why 291 tests can
 run in a plain Node environment with no canvas and no WebGL, and it is why
 `GameScene` is mostly sequencing rather than logic.
 
@@ -220,6 +220,20 @@ cells:
 - Hazards are tested against a sub-rectangle of the cell — floor spikes only
   occupy the bottom five pixels — using a player hitbox inset by one pixel on
   every side. Deaths should always look deserved.
+
+### Proving the house is playable
+
+`tests/reachability.ts` is a small solver that explores a room by running the
+actual `Player.step` model: from every place the player can stand, it tries
+walking and jumping in each direction, records where they land, and repeats.
+
+It is deliberately optimistic — no enemies, and every attempt starts with the
+crumbling floors intact — so anything it calls unreachable really is
+unreachable, and it never fails at random.
+
+It exists because six rooms passed every structural check and were still
+impossible. Reasoning about geometry is not enough; only simulating the jump
+tells you whether the jump works.
 
 ### Enemies
 
@@ -408,10 +422,41 @@ and `x: 246` on the right.
 
 - A jump clears **four rows (32 px)**, so put ledges **three rows apart** for a
   comfortable climb and four for a hard one. Five is impossible.
-- A standing jump crosses about **40 px** horizontally at the same height, so
-  keep gaps to four tiles or fewer.
+- A standing jump crosses about **48 px** horizontally at the same height, but
+  that is the absolute limit and needs a frame-perfect launch. Keep same-height
+  gaps to **40 px (five tiles) or less**.
 - Entering from above, the player arrives falling at the `up` spawn. Make sure
   something catches them within 72 px, or the landing is fatal.
+
+**Mind the headroom.** This is the rule that is easiest to get wrong, because
+the room looks fine. A jump only reaches its full height if there is nothing
+above the player's head. Standing on a ledge at row 4 with a solid ceiling at
+row 0, the player's head hits that ceiling after eight pixels, and their feet
+get no higher than the top of row 3 — so a ledge at row 2 is unreachable, no
+matter how close it looks. Under a solid ceiling, **row 3 is the highest ledge
+you can land on**.
+
+**Rooms with an `up` exit** have a shape that works, and it is worth copying:
+
+- Put the top ledge at **row 4**, spanning the columns of the ceiling hole.
+  Standing on it under the hole, a straight-up jump goes clear out of the room,
+  because there is no ceiling in the way.
+- Put a ledge **directly below it at row 7**, sharing some columns, so the
+  climb up to it is an ordinary three-row jump.
+- Do not put a ledge inside the ceiling hole itself. Dropping in from the room
+  above lands you on it, walled in on both sides, with no way down: platforms
+  are one-way, so you cannot drop through.
+
+### 4a. Every doorway has to work on its own
+
+A room is not playable because _some_ way in leads everywhere. It is playable
+when **every** way in does. It is very easy to build a room that works
+beautifully when you fall into it through the ceiling, and is a one-way trap
+when you walk in from the side — the ledge you need is reachable from above and
+from nowhere else.
+
+`tests/reachability.test.ts` checks this for you, per entrance, by running the
+real movement model. If it says a room is broken, it is broken.
 
 ### 5. Enemies
 
@@ -479,7 +524,7 @@ room. A broken room fails the build.
 npm test
 ```
 
-251 tests, in a plain Node environment — no browser, no canvas, no Phaser.
+291 tests, in a plain Node environment — no browser, no canvas, no Phaser.
 
 | File                      | Covers                                                                                               |
 | ------------------------- | ---------------------------------------------------------------------------------------------------- |
@@ -525,4 +570,5 @@ whole house at startup and logs anything wrong to the console.
 No React, no Vue, no backend, no database, no authentication, no cloud services,
 no ECS framework, and no third-party artwork, fonts or audio. Phaser draws
 things; the rest is a few thousand lines of plain TypeScript.
+
 # get-set-billy
