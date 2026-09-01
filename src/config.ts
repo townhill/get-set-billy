@@ -85,6 +85,10 @@ export const WORLD = {
   conveyorSpeed: 48,
   /** How long a crumbling floor survives being stood on, in milliseconds. */
   crumbleLifetimeMs: 520,
+  /** How long a gate takes to grind open once you pick up its key, in milliseconds. */
+  gateOpenMs: 520,
+  /** Shortest gap between two "that gate is locked" complaints, in milliseconds. */
+  gateNagCooldownMs: 1400,
 } as const;
 
 export const AUDIO = {

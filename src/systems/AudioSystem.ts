@@ -41,6 +41,14 @@ const EFFECTS = {
     { freq: 150, duration: 0.1, wave: 'sawtooth' as Waveform },
     { freq: 110, duration: 0.16, at: 0.12, wave: 'sawtooth' as Waveform },
   ],
+  // A gate giving way: the clunk of the lock, then the bars going up.
+  unlock: [
+    { freq: 180, to: 120, duration: 0.09, wave: 'sawtooth' as Waveform, gain: 0.6 },
+    { freq: 440, duration: 0.07, at: 0.1 },
+    { freq: 660, duration: 0.07, at: 0.17 },
+    { freq: 880, duration: 0.07, at: 0.24 },
+    { freq: 1320, duration: 0.22, at: 0.31, gain: 0.55 },
+  ],
   victory: [
     { freq: 523, duration: 0.12 },
     { freq: 659, duration: 0.12, at: 0.12 },

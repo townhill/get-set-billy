@@ -1,5 +1,5 @@
 import { ROOM_COLS, ROOM_ROWS } from '../config';
-import { isKnownTile } from './tiles';
+import { LOCK_COLOURS, type LockColour, isKnownTile } from './tiles';
 
 /** The four ways out of a room. */
 export type Direction = 'left' | 'right' | 'up' | 'down';
@@ -89,6 +89,15 @@ export interface ItemDef {
   sprite: string;
   x: number;
   y: number;
+  /**
+   * Makes this collectable a key. Picking it up opens every gate of that colour
+   * in the house, permanently.
+   *
+   * A key is still an ordinary item and still counts towards the total, which
+   * is why holding one needs no room in the save file: the set of keys is
+   * derived from the set of items collected.
+   */
+  opens?: LockColour;
 }
 
 export interface RoomData {
@@ -154,6 +163,9 @@ export function validateRoomShape(data: RoomData): string[] {
   for (const item of data.items ?? []) {
     if (ids.has(item.id)) issues.push(`duplicate item id "${item.id}"`);
     ids.add(item.id);
+    if (item.opens !== undefined && !LOCK_COLOURS.includes(item.opens)) {
+      issues.push(`item "${item.id}" opens unknown lock "${item.opens}"`);
+    }
   }
 
   return issues;

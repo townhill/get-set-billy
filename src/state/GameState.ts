@@ -13,6 +13,14 @@ export interface GameStateSnapshot {
   elapsedMs: number;
   entrySpawn: SpawnKey;
   deaths: number;
+  /**
+   * Rooms the player has set foot in, for the map.
+   *
+   * Optional, because saves written before there was a map do not have it. One
+   * of those resumes with only the room it was saved in marked, and fills back
+   * in as the player walks about.
+   */
+  visitedRooms?: string[];
 }
 
 export class GameState {
@@ -23,6 +31,7 @@ export class GameState {
   startedAt: number;
   entrySpawn: SpawnKey;
   deaths: number;
+  readonly visitedRooms: Set<string>;
 
   constructor(startRoom: string = WORLD.startRoom, lives: number = WORLD.startingLives) {
     this.currentRoom = startRoom;
@@ -31,6 +40,7 @@ export class GameState {
     this.startedAt = Date.now();
     this.entrySpawn = 'start';
     this.deaths = 0;
+    this.visitedRooms = new Set([startRoom]);
   }
 
   get collectedCount(): number {
@@ -66,6 +76,7 @@ export class GameState {
   enterRoom(id: string, spawn: SpawnKey): void {
     this.currentRoom = id;
     this.entrySpawn = spawn;
+    this.visitedRooms.add(id);
   }
 
   toSnapshot(): GameStateSnapshot {
@@ -76,6 +87,7 @@ export class GameState {
       elapsedMs: this.elapsedMs,
       entrySpawn: this.entrySpawn,
       deaths: this.deaths,
+      visitedRooms: [...this.visitedRooms],
     };
   }
 
@@ -86,6 +98,7 @@ export class GameState {
     state.startedAt = Date.now() - Math.max(0, snapshot.elapsedMs);
     state.entrySpawn = snapshot.entrySpawn;
     state.deaths = snapshot.deaths;
+    for (const id of snapshot.visitedRooms ?? [snapshot.currentRoom]) state.visitedRooms.add(id);
     return state;
   }
 }

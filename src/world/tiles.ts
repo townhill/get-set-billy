@@ -17,6 +17,17 @@ export interface HazardRect {
   h: number;
 }
 
+/**
+ * The four kinds of key in the house, and therefore the four kinds of gate.
+ *
+ * A key is never spent and never dropped: picking one up opens every gate of
+ * that colour, everywhere, for good. That removes the whole class of dead end
+ * where a player uses a key on the wrong door and strands themselves.
+ */
+export const LOCK_COLOURS = ['brass', 'silver', 'iron', 'copper'] as const;
+
+export type LockColour = (typeof LOCK_COLOURS)[number];
+
 export interface TileDef {
   /** The character used in room data. */
   char: string;
@@ -32,6 +43,8 @@ export interface TileDef {
   conveyor: -1 | 0 | 1;
   /** Collapses shortly after being stood on. */
   crumbles: boolean;
+  /** The key that opens this cell, or null if it is not a gate. */
+  lock: LockColour | null;
 }
 
 const EMPTY: Omit<TileDef, 'char' | 'name'> = {
@@ -40,7 +53,17 @@ const EMPTY: Omit<TileDef, 'char' | 'name'> = {
   hazard: null,
   conveyor: 0,
   crumbles: false,
+  lock: null,
 };
+
+/** A gate: solid until you hold its key, and plain air the moment you do. */
+const gate = (char: string, lock: LockColour): TileDef => ({
+  char,
+  name: `${lock} gate`,
+  ...EMPTY,
+  solid: true,
+  lock,
+});
 
 export const TILES: Readonly<Record<string, TileDef>> = {
   '.': { char: '.', name: 'air', ...EMPTY },
@@ -55,6 +78,10 @@ export const TILES: Readonly<Record<string, TileDef>> = {
   v: { char: 'v', name: 'ceiling spikes', ...EMPTY, hazard: { x: 0, y: 0, w: 8, h: 5 } },
   '~': { char: '~', name: 'something wet', ...EMPTY, hazard: { x: 0, y: 1, w: 8, h: 7 } },
   '*': { char: '*', name: 'unpleasantness', ...EMPTY, hazard: { x: 1, y: 1, w: 6, h: 6 } },
+  B: gate('B', 'brass'),
+  S: gate('S', 'silver'),
+  I: gate('I', 'iron'),
+  C: gate('C', 'copper'),
 };
 
 export const AIR = TILES['.'];
@@ -62,6 +89,19 @@ export const AIR = TILES['.'];
 export function tileDef(char: string): TileDef {
   return TILES[char] ?? AIR;
 }
+
+/** The key a cell needs, or null if it is not a gate. */
+export function lockColour(char: string): LockColour | null {
+  return tileDef(char).lock;
+}
+
+/** The tile character for each gate colour, for tests and documentation. */
+export const GATE_CHARS: Readonly<Record<LockColour, string>> = Object.fromEntries(
+  LOCK_COLOURS.map((lock) => [
+    lock,
+    Object.values(TILES).find((tile) => tile.lock === lock)?.char ?? '?',
+  ]),
+) as Record<LockColour, string>;
 
 export function isKnownTile(char: string): boolean {
   return Object.hasOwn(TILES, char);

@@ -35,7 +35,10 @@ function isSnapshot(value: unknown): value is GameStateSnapshot {
     v.collectedItems.every((item) => typeof item === 'string') &&
     typeof v.elapsedMs === 'number' &&
     typeof v.entrySpawn === 'string' &&
-    typeof v.deaths === 'number'
+    typeof v.deaths === 'number' &&
+    // Added with the map, so a save written before it is still perfectly good.
+    (v.visitedRooms === undefined ||
+      (Array.isArray(v.visitedRooms) && v.visitedRooms.every((id) => typeof id === 'string')))
   );
 }
 

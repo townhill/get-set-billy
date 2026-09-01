@@ -332,3 +332,16 @@ export const CRUMBLE_ART: readonly Art[] = [
   ['1111.111', '2.22.22.', '........', '........', '........', '........', '........', '........'],
   ['1.11..1.', '..2...2.', '........', '........', '........', '........', '........', '........'],
 ];
+
+/**
+ * A locked gate, in three stages of opening.
+ *
+ * Bars sit at columns 0, 3 and 6, so a run of gates side by side keeps an even
+ * spacing across the join, and a rail at the top of each cell means a stack of
+ * them reads as one tall portcullis rather than a column of separate tiles.
+ */
+export const GATE_ART: readonly Art[] = [
+  ['11111111', '1..1..1.', '1..1..1.', '2..2..2.', '11111111', '1..1..1.', '1..1..1.', '2..2..2.'],
+  ['11111111', '1..1..1.', '2..2..2.', '........', '11111111', '1..1..1.', '2..2..2.', '........'],
+  ['11111111', '2..2..2.', '........', '........', '11111111', '2..2..2.', '........', '........'],
+];

@@ -49,6 +49,41 @@ describe('with working storage', () => {
     expect(restored.entrySpawn).toBe('down');
     expect(restored.lives).toBe(3);
     expect(restored.isCollected('library-spectacles')).toBe(true);
+    expect([...restored.visitedRooms].sort()).toEqual(['damp-library', 'hat-attic']);
+  });
+
+  it('still loads a save written before rooms were remembered', () => {
+    globalThis.localStorage.setItem(
+      SAVE.storageKey,
+      JSON.stringify({
+        currentRoom: 'hat-attic',
+        lives: 3,
+        collectedItems: ['a'],
+        elapsedMs: 1000,
+        entrySpawn: 'down',
+        deaths: 1,
+      }),
+    );
+    const loaded = SaveSystem.load();
+    expect(loaded).not.toBeNull();
+    expect(loaded?.visitedRooms).toBeUndefined();
+    expect([...GameState.fromSnapshot(loaded!).visitedRooms]).toEqual(['hat-attic']);
+  });
+
+  it('refuses a save whose room list is the wrong shape', () => {
+    globalThis.localStorage.setItem(
+      SAVE.storageKey,
+      JSON.stringify({
+        currentRoom: 'attic',
+        lives: 3,
+        collectedItems: [],
+        elapsedMs: 0,
+        entrySpawn: 'start',
+        deaths: 0,
+        visitedRooms: [1, 2],
+      }),
+    );
+    expect(SaveSystem.load()).toBeNull();
   });
 
   it('forgets a game when asked to', () => {

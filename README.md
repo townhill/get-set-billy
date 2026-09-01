@@ -7,6 +7,10 @@ You are trapped in a large, eccentric, mildly unreasonable mansion. Twenty-five
 objects are scattered through its fourteen rooms. Find all of them, then find
 the front door, which will not open until you have.
 
+Two of those objects are keys. Parts of the house are barred by gates, and a
+gate stays shut until you are carrying the right key — so the house is not
+simply open from the first second, and there is an order in which it gives way.
+
 The game is inspired by the _shape_ of early-1980s British 8-bit platform games:
 single-screen rooms that join up into one interconnected house, precise jumps,
 strange and entirely predictable enemies, flashing collectables, and a status
@@ -95,7 +99,7 @@ Then open <http://localhost:5173>. Vite hot-reloads as you edit.
 | Walk right               | `→` or `D`                  | D-pad right, or left stick |
 | Jump                     | `Space`, `↑` or `W`         | A / B, or D-pad up         |
 | Restart the current room | `R` — **this costs a life** | X                          |
-| Pause                    | `Esc` or `P`                | Start                      |
+| Pause, and see the map   | `Esc` or `P`                | Start                      |
 | Sound on/off             | `M`                         | —                          |
 | Choose a menu option     | `↑` / `↓`                   | D-pad up/down              |
 | Confirm                  | `Space` or `Enter`          | A, or Start                |
@@ -154,7 +158,7 @@ src/
     SaveSystem.ts          localStorage, defensively
 
   state/
-    GameState.ts           Room, lives, collected items, clock
+    GameState.ts           Room, lives, collected items, rooms seen, clock
 
   render/
     pixels.ts              Plot art strings onto a canvas
@@ -163,6 +167,7 @@ src/
 
   ui/
     Hud.ts                 The status panel
+    MapOverlay.ts          The map of the house, shown while paused
     DebugOverlay.ts        Collision boxes and numbers, when asked for
 
   assets/
@@ -180,7 +185,7 @@ src/
 Phaser draws things and runs the loop. It does not decide anything.
 
 All the rules — movement, collision, enemy paths, room structure, game state,
-saving — live in modules that import no Phaser at all. That is why 330 tests can
+saving — live in modules that import no Phaser at all. That is why 368 tests can
 run in a plain Node environment with no canvas and no WebGL, and it is why
 `GameScene` is mostly sequencing rather than logic.
 
@@ -274,6 +279,7 @@ interface GameState {
   startedAt: number; // elapsedMs is derived from this
   entrySpawn: SpawnKey; // where a death sends you back to
   deaths: number;
+  visitedRooms: Set<string>; // for the map
 }
 ```
 
@@ -286,7 +292,10 @@ you entered the room rather than to some fixed point.
 ### Saving
 
 `SaveSystem` writes a snapshot to `localStorage` after every room change, every
-item picked up, and every death. The title screen offers **Continue** when a save
+item picked up, and every death. Which keys the player holds is not in there:
+it is worked out from the items they have collected, so keys arrived without a
+format change, and `visitedRooms` is optional so a save written before the map
+existed still loads. The title screen offers **Continue** when a save
 exists and **New Game** always.
 
 Everything is wrapped in `try`/`catch` and validated on the way back in: a
@@ -414,6 +423,10 @@ Exactly **20 rows of exactly 32 characters**. Each cell is 8×8 logical pixels.
 | `*`  | Unpleasantness — a small static hazard                                |
 | `,`  | Decoration — the theme's first decorative shape, never solid          |
 | `:`  | Decoration — the theme's second decorative shape, never solid         |
+| `B`  | Brass gate — solid until you are carrying the brass key               |
+| `S`  | Silver gate                                                           |
+| `I`  | Iron gate                                                             |
+| `C`  | Copper gate                                                           |
 
 ### 3. Exits, spawns and the map
 
@@ -508,6 +521,12 @@ the room.
 { "id": "cupboard-boot", "sprite": "boot", "x": 80, "y": 24 }
 ```
 
+Add `"opens"` to make it a key:
+
+```json
+{ "id": "cupboard-key", "sprite": "key", "x": 80, "y": 24, "opens": "brass" }
+```
+
 `id` must be unique across the house — prefixing it with the room name is a good
 habit. `x` and `y` should be multiples of 8. Sprites are 8×8, drawn as a single
 flashing colour: `teacup`, `key`, `umbrella`, `monocle`, `biscuit`,
@@ -517,6 +536,65 @@ flashing colour: `teacup`, `key`, `umbrella`, `monocle`, `biscuit`,
 The total is counted from the data, so the HUD and the win condition update on
 their own. Adding a collectable changes `25` to `26` everywhere with no other
 edits.
+
+Keys do not flash through the palette like the other collectables. They are
+drawn in their own lock's colour, pulsing gently between its two inks, because
+which gate a key fits has to be obvious from across the room.
+
+### 6a. Keys and gates
+
+A gate is a tile that is solid until you are carrying its key, and plain air the
+moment you are. There are four colours — `brass`, `silver`, `iron`, `copper` —
+written in the grid as `B`, `S`, `I` and `C`, and drawn in that colour in every
+room, so a brass gate is recognisably the brass gate wherever you meet it.
+
+**A key is an ordinary collectable with one extra field.** It counts towards the
+twenty-five like everything else, and which keys you are carrying is worked out
+from the items you have collected rather than stored, so adding keys needed no
+change at all to the save format and every save written before they existed
+still loads.
+
+**Keys are never spent.** Picking one up opens every gate of that colour in the
+house, for good. That is deliberate: a key you can use up is a key you can use
+on the wrong door, and then the game is over without saying so.
+
+Gates work by the same trick crumbling floors already used. `Room.charAt()`
+returns air for a cell that has collapsed; it now also returns air for a gate
+you can open. Everything downstream — `solidAt`, the swept collision, the
+reachability solver — gets the new behaviour without knowing locks exist.
+
+Where a gate may go:
+
+- **Never on an edge row or column.** A gate stops being solid, so it must never
+  be the thing sealing an edge the room is supposed to seal.
+- **From something solid to something solid.** A gate with a gap above it can be
+  jumped over; one with a gap below can be walked under. Run it wall to wall.
+- **Not in a column you can fall through.** Otherwise a player dropping in from
+  the room above lands on top of a locked gate, in mid-air, with nowhere to go.
+- **Not where a spawn point is**, which the spawn tests already catch, because a
+  fresh `Room` holds no keys and every gate in it is solid.
+
+`tests/rooms.test.ts` checks all of these. `tests/progression.test.ts` checks the
+much more important thing: that the house can still be finished.
+
+### 6b. Not painting yourself into a corner
+
+Locks introduce a way to break the game that no per-room check can see. Every
+room can be well formed, every exit reciprocal, every ledge reachable — and the
+game still unfinishable, because the iron key is behind the iron gate.
+
+`tests/progression.test.ts` settles it by running a fixpoint. Start at the front
+door with nothing. Walk the house, room by room and doorway by doorway, using
+the real movement model. Take everything you can reach. If that got you a key,
+go round again. Keys are never spent, so the set only grows and the loop always
+finishes. When it does, everything must be collectable and the front door
+reachable, or the build fails.
+
+It also checks the nastier half, which is easy to miss: **every room you can get
+into, you can get out of again, the way you came.** A gate on the wrong side of
+a doorway makes a room that swallows the player, and dying does not help, because
+a death puts them back at the same doorway. That check runs for the clumsy player
+too.
 
 ### 7. Themes
 
@@ -547,7 +625,7 @@ room. A broken room fails the build.
 npm test
 ```
 
-330 tests, in a plain Node environment — no browser, no canvas, no Phaser.
+368 tests, in a plain Node environment — no browser, no canvas, no Phaser.
 
 | File                         | Covers                                                                                                                                                                  |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -556,8 +634,10 @@ npm test
 | `tests/enemy.test.ts`        | Each movement type, its bounds, its period, and its determinism                                                                                                         |
 | `tests/rooms.test.ts`        | The whole house: structure, connectivity, spawns, items, enemies                                                                                                        |
 | `tests/reachability.test.ts` | Whether the house is actually _playable_: the real movement model run from every doorway, at full ability and again for a player who cannot quite manage a perfect jump |
-| `tests/gamestate.test.ts`    | Collecting, lives, win condition, snapshots, the clock                                                                                                                  |
-| `tests/save.test.ts`         | Round trips, corrupt saves, no storage, storage that throws                                                                                                             |
+| `tests/progression.test.ts`  | Whether the house can still be _finished_: keys and gates worked through from nothing, and no room you can walk into and not walk out of                                |
+| `tests/gamestate.test.ts`    | Collecting, lives, win condition, snapshots, rooms seen, the clock                                                                                                      |
+| `tests/save.test.ts`         | Round trips, corrupt saves, saves written before the map existed, no storage, storage that throws                                                                       |
+| `tests/map.test.ts`          | That every room gets a cell on the map, on screen, in the right place                                                                                                   |
 | `tests/font.test.ts`         | Every glyph and every piece of artwork is the size it claims                                                                                                            |
 
 The tests are there to catch real mistakes — a room you cannot get out of, a

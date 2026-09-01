@@ -1,6 +1,6 @@
 import { ROOM_COLS, ROOM_ROWS, TILE_SIZE, WORLD } from '../config';
 import type { TileGrid } from '../systems/CollisionSystem';
-import { type HazardRect, tileDef } from './tiles';
+import { type HazardRect, type LockColour, tileDef } from './tiles';
 import type { Direction, RoomData } from './roomTypes';
 
 /**
@@ -15,6 +15,8 @@ export class Room implements TileGrid {
   private readonly collapsed = new Set<number>();
   /** Cells mid-collapse, with the milliseconds they have left. */
   private readonly collapsing = new Map<number, number>();
+  /** Gate colours the player currently holds the key to. */
+  private readonly openLocks = new Set<LockColour>();
 
   constructor(readonly data: RoomData) {}
 
@@ -30,10 +32,26 @@ export class Room implements TileGrid {
     return row * this.cols + col;
   }
 
-  /** The tile character at a cell, or '.' outside the room or where a floor has gone. */
+  /**
+   * The tile character at a cell, or '.' outside the room, where a floor has
+   * gone, or where a gate has been unlocked.
+   *
+   * Everything downstream — solidAt, platformAt, the swept collision, the
+   * reachability solver — reads the room through here, so an opened gate simply
+   * stops existing and nothing else has to know about locks at all.
+   */
   charAt(col: number, row: number): string {
     if (col < 0 || col >= this.cols || row < 0 || row >= this.rows) return '.';
     if (this.collapsed.has(this.index(col, row))) return '.';
+    const char = this.data.tiles[row][col];
+    const lock = tileDef(char).lock;
+    if (lock !== null && this.openLocks.has(lock)) return '.';
+    return char;
+  }
+
+  /** The tile character as authored, ignoring collapses and unlocked gates. */
+  rawCharAt(col: number, row: number): string {
+    if (col < 0 || col >= this.cols || row < 0 || row >= this.rows) return '.';
     return this.data.tiles[row][col];
   }
 
@@ -91,6 +109,34 @@ export class Room implements TileGrid {
     if (remaining === undefined) return 0;
     const elapsed = 1 - remaining / WORLD.crumbleLifetimeMs;
     return Math.min(3, 1 + Math.floor(elapsed * 3));
+  }
+
+  /**
+   * Tells the room which keys the player is carrying.
+   *
+   * Deliberately separate from `reset()`: the reachability solver resets the
+   * floors before every single attempt, and losing the keys each time would
+   * make a gated room look impassable.
+   */
+  setKeys(keys: Iterable<LockColour>): void {
+    this.openLocks.clear();
+    for (const lock of keys) this.openLocks.add(lock);
+  }
+
+  isUnlocked(lock: LockColour): boolean {
+    return this.openLocks.has(lock);
+  }
+
+  /** Every gate colour this room actually contains. */
+  get locks(): Set<LockColour> {
+    const found = new Set<LockColour>();
+    for (const row of this.data.tiles) {
+      for (const char of row) {
+        const lock = tileDef(char).lock;
+        if (lock !== null) found.add(lock);
+      }
+    }
+    return found;
   }
 
   /** Puts every floor back. Called whenever the room is (re)entered. */

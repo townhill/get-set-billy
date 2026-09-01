@@ -1,10 +1,11 @@
 import type Phaser from 'phaser';
 import { GAME_WIDTH, HUD_HEIGHT, PLAY_HEIGHT } from '../config';
-import { type PaletteKey, paletteColour } from '../assets/palette';
-import { LIFE_ICON } from '../assets/sprites';
+import { LOCK_INKS, type PaletteKey, paletteColour } from '../assets/palette';
+import { ITEM_SPRITES, LIFE_ICON } from '../assets/sprites';
 import { PixelText } from '../render/PixelText';
 import { artToCanvas, themedResolver } from '../render/pixels';
 import { formatDuration } from '../state/GameState';
+import { LOCK_COLOURS, type LockColour } from '../world/tiles';
 
 /**
  * The status panel along the bottom of the screen.
@@ -16,6 +17,10 @@ import { formatDuration } from '../state/GameState';
 
 const LIFE_ICON_KEY = 'hud-life-icon';
 const MAX_LIFE_ICONS = 6;
+/** Each lock gets a fixed slot, so a key never moves once you have it. */
+const KEY_ICON_X = 156;
+const KEY_ICON_GAP = 8;
+const keyIconKey = (lock: LockColour): string => `hud-key-${lock}`;
 const PANEL_TOP = PLAY_HEIGHT;
 const NAME_Y = PANEL_TOP + 5;
 const STATS_Y = PANEL_TOP + 18;
@@ -27,6 +32,8 @@ export interface HudModel {
   lives: number;
   elapsedMs: number;
   muted: boolean;
+  /** Which gate colours the player can open. */
+  keys: ReadonlySet<LockColour>;
   /** Ink used for the room name, so the panel picks up each room's colour. */
   accent: PaletteKey;
 }
@@ -38,6 +45,7 @@ export class Hud {
   private readonly timeLabel: PixelText;
   private readonly muteLabel: PixelText;
   private readonly lifeIcons: Phaser.GameObjects.Image[] = [];
+  private readonly keyIcons = new Map<LockColour, Phaser.GameObjects.Image>();
 
   private messageMs = 0;
   private message: string | null = null;
@@ -47,6 +55,15 @@ export class Hud {
   constructor(private readonly scene: Phaser.Scene) {
     if (!scene.textures.exists(LIFE_ICON_KEY)) {
       scene.textures.addCanvas(LIFE_ICON_KEY, artToCanvas(LIFE_ICON, themedResolver({})));
+    }
+
+    for (const lock of LOCK_COLOURS) {
+      if (scene.textures.exists(keyIconKey(lock))) continue;
+      const ink = paletteColour(LOCK_INKS[lock][0]) ?? '#ffffff';
+      scene.textures.addCanvas(
+        keyIconKey(lock),
+        artToCanvas(ITEM_SPRITES.key, themedResolver({ '1': ink })),
+      );
     }
 
     this.chrome = scene.add.graphics().setDepth(90);
@@ -99,6 +116,15 @@ export class Hud {
         .setVisible(false);
       this.lifeIcons.push(icon);
     }
+
+    LOCK_COLOURS.forEach((lock, index) => {
+      const icon = scene.add
+        .image(KEY_ICON_X + index * KEY_ICON_GAP, STATS_Y - 1, keyIconKey(lock))
+        .setOrigin(0, 0)
+        .setDepth(92)
+        .setVisible(false);
+      this.keyIcons.set(lock, icon);
+    });
   }
 
   /** Replaces the room name with a temporary line, for the given number of ms. */
@@ -138,6 +164,7 @@ export class Hud {
     this.muteLabel.setText(model.muted ? 'MUTE' : '');
 
     this.lifeIcons.forEach((icon, index) => icon.setVisible(index < model.lives));
+    for (const [lock, icon] of this.keyIcons) icon.setVisible(model.keys.has(lock));
   }
 
   destroy(): void {
@@ -147,6 +174,12 @@ export class Hud {
     this.timeLabel.destroy();
     this.muteLabel.destroy();
     for (const icon of this.lifeIcons) icon.destroy();
+    for (const icon of this.keyIcons.values()) icon.destroy();
+    this.keyIcons.clear();
     if (this.scene.textures.exists(LIFE_ICON_KEY)) this.scene.textures.remove(LIFE_ICON_KEY);
+    for (const lock of LOCK_COLOURS) {
+      if (this.scene.textures.exists(keyIconKey(lock)))
+        this.scene.textures.remove(keyIconKey(lock));
+    }
   }
 }

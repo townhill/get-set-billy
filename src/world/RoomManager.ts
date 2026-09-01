@@ -1,5 +1,6 @@
 import { Room } from './Room';
 import { type Direction, type RoomData, validateRoomShape } from './roomTypes';
+import type { LockColour } from './tiles';
 
 /**
  * Loads every room in src/data/rooms and hands them out by id.
@@ -33,6 +34,30 @@ export const ALL_ITEM_IDS: readonly string[] = ALL_ROOM_DATA.flatMap((room) =>
 );
 
 export const TOTAL_ITEMS = ALL_ITEM_IDS.length;
+
+/** Every collectable that is also a key, and the gate colour it opens. */
+export const KEY_ITEMS: ReadonlyMap<string, LockColour> = new Map(
+  ALL_ROOM_DATA.flatMap((room) =>
+    (room.items ?? [])
+      .filter((item) => item.opens !== undefined)
+      .map((item) => [item.id, item.opens as LockColour] as const),
+  ),
+);
+
+/**
+ * Which gates a player carrying these items can open.
+ *
+ * Derived rather than stored, which is why adding keys needed no change to the
+ * save format and every save written before they existed still loads.
+ */
+export function keysHeld(collected: Iterable<string>): Set<LockColour> {
+  const held = new Set<LockColour>();
+  for (const id of collected) {
+    const lock = KEY_ITEMS.get(id);
+    if (lock !== undefined) held.add(lock);
+  }
+  return held;
+}
 
 export class RoomManager {
   private readonly rooms = new Map<string, Room>();
@@ -79,6 +104,26 @@ export class RoomManager {
   validate(): string[] {
     const problems: string[] = [];
     const seenItems = new Set<string>();
+    const gatesUsed = new Set<LockColour>();
+    const keysGiven = new Map<LockColour, string[]>();
+
+    for (const room of this.rooms.values()) {
+      for (const lock of room.locks) gatesUsed.add(lock);
+      for (const item of room.data.items ?? []) {
+        if (item.opens === undefined) continue;
+        keysGiven.set(item.opens, [...(keysGiven.get(item.opens) ?? []), item.id]);
+      }
+    }
+
+    for (const lock of gatesUsed) {
+      const keys = keysGiven.get(lock) ?? [];
+      if (keys.length === 0) problems.push(`there are ${lock} gates but no ${lock} key`);
+    }
+
+    for (const [lock, keys] of keysGiven) {
+      if (keys.length > 1) problems.push(`more than one ${lock} key: ${keys.join(', ')}`);
+      if (!gatesUsed.has(lock)) problems.push(`the ${lock} key opens nothing`);
+    }
 
     for (const room of this.rooms.values()) {
       for (const issue of validateRoomShape(room.data)) {

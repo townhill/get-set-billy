@@ -1,7 +1,6 @@
 import Phaser from 'phaser';
 import {
   FIXED_STEP_MS,
-  GAME_WIDTH,
   MAX_STEPS_PER_FRAME,
   PLAYER,
   PLAY_HEIGHT,
@@ -12,7 +11,6 @@ import {
 import { ENEMY_SPRITES, ITEM_SPRITES, DOOR_HEIGHT, DOOR_WIDTH } from '../assets/sprites';
 import { ITEM_FLASH_COLOURS } from '../assets/palette';
 import { type ThemeDef, themeFor } from '../assets/themes';
-import { PixelText } from '../render/PixelText';
 import { buildRoomTexture, keys } from '../render/textures';
 import { Player } from '../objects/Player';
 import { enemyBox, enemyFacing } from '../objects/Enemy';
@@ -21,10 +19,13 @@ import { audio } from '../systems/AudioSystem';
 import { input } from '../systems/InputSystem';
 import { SaveSystem } from '../systems/SaveSystem';
 import { GameState, type GameStateSnapshot, type SpawnKey } from '../state/GameState';
-import { RoomManager, TOTAL_ITEMS } from '../world/RoomManager';
+import { ALL_ROOM_DATA, KEY_ITEMS, RoomManager, TOTAL_ITEMS, keysHeld } from '../world/RoomManager';
 import type { Room } from '../world/Room';
 import { OPPOSITE, type Direction, type ItemDef } from '../world/roomTypes';
+import { GATE_ART } from '../assets/tileArt';
+import { type LockColour, lockColour } from '../world/tiles';
 import { Hud } from '../ui/Hud';
+import { MapOverlay } from '../ui/MapOverlay';
 import { DebugOverlay } from '../ui/DebugOverlay';
 
 /**
@@ -74,6 +75,9 @@ export class GameScene extends Phaser.Scene {
   private roomTimeMs = 0;
   private deathTimerMs = 0;
   private lockedNoiseCooldownMs = 0;
+  private gateNagCooldownMs = 0;
+  /** A gate colour part-way through grinding open, and how long it has been going. */
+  private gateOpening: { lock: LockColour; ms: number } | null = null;
 
   private roomImage!: Phaser.GameObjects.Image;
   private playerImage!: Phaser.GameObjects.Image;
@@ -81,8 +85,7 @@ export class GameScene extends Phaser.Scene {
   private dynamicTiles: DynamicTile[] = [];
   private enemyImages: Phaser.GameObjects.Image[] = [];
   private itemImages = new Map<string, Phaser.GameObjects.Image>();
-  private pauseLabel: PixelText | null = null;
-  private pauseHint: PixelText | null = null;
+  private map: MapOverlay | null = null;
 
   constructor() {
     super('GameScene');
@@ -101,6 +104,7 @@ export class GameScene extends Phaser.Scene {
     this.roomImage = this.add.image(0, 0, '__DEFAULT').setOrigin(0, 0).setDepth(DEPTH.room);
     this.playerImage = this.add.image(0, 0, '__DEFAULT').setOrigin(0, 0).setDepth(DEPTH.player);
     this.hud = new Hud(this);
+    this.map = new MapOverlay(this, DEPTH.overlay);
 
     if (isDebugEnabled()) {
       this.debug = new DebugOverlay(this);
@@ -126,6 +130,9 @@ export class GameScene extends Phaser.Scene {
 
     this.room = this.rooms.get(id);
     this.room.reset();
+    // Before anything reads the geometry: an opened gate has to already be air.
+    this.room.setKeys(keysHeld(this.state.collectedItems));
+    this.gateOpening = null;
     this.theme = themeFor(this.room.data.theme);
     this.state.enterRoom(id, spawn);
     this.roomTimeMs = 0;
@@ -173,8 +180,10 @@ export class GameScene extends Phaser.Scene {
         return keys.conveyor(theme, 0);
       case '%':
         return keys.crumble(theme, 0);
-      default:
-        return null;
+      default: {
+        const lock = lockColour(char);
+        return lock === null ? null : keys.gate(lock, 0);
+      }
     }
   }
 
@@ -204,10 +213,9 @@ export class GameScene extends Phaser.Scene {
   private buildItems(): void {
     for (const item of this.room.data.items ?? []) {
       if (this.state.isCollected(item.id)) continue;
-      const image = this.add
-        .image(item.x, item.y, keys.item(item.sprite, 0))
-        .setOrigin(0, 0)
-        .setDepth(DEPTH.items);
+      const lock = KEY_ITEMS.get(item.id);
+      const texture = lock === undefined ? keys.item(item.sprite, 0) : keys.keyItem(lock, 0);
+      const image = this.add.image(item.x, item.y, texture).setOrigin(0, 0).setDepth(DEPTH.items);
       this.itemImages.set(item.id, image);
     }
   }
@@ -248,6 +256,12 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.lockedNoiseCooldownMs = Math.max(0, this.lockedNoiseCooldownMs - deltaMs);
+    this.gateNagCooldownMs = Math.max(0, this.gateNagCooldownMs - deltaMs);
+
+    if (this.gateOpening !== null) {
+      this.gateOpening.ms += deltaMs;
+      if (this.gateOpening.ms >= WORLD.gateOpenMs) this.gateOpening = null;
+    }
 
     this.render(deltaMs);
     input.endFrame();
@@ -307,6 +321,7 @@ export class GameScene extends Phaser.Scene {
 
     this.collectItems(hitbox);
     this.checkDoor(hitbox);
+    this.nagAboutGates();
     return false;
   }
 
@@ -330,15 +345,65 @@ export class GameScene extends Phaser.Scene {
       this.state.collect(item.id);
       this.itemImages.get(item.id)?.destroy();
       this.itemImages.delete(item.id);
-      audio.play('collect');
       this.autosave();
+
+      if (item.opens !== undefined) {
+        this.openGates(item.opens);
+      } else {
+        audio.play('collect');
+      }
 
       if (this.state.hasEverything(TOTAL_ITEMS)) {
         this.onEverythingCollected();
-      } else {
+      } else if (item.opens === undefined) {
         const left = TOTAL_ITEMS - this.state.collectedCount;
         this.hud.say(`${left} STILL MISSING`, 1100, 'G');
       }
+    }
+  }
+
+  /** Picking up a key opens every gate of that colour, in this room and the rest. */
+  private openGates(lock: LockColour): void {
+    this.room.setKeys(keysHeld(this.state.collectedItems));
+    this.gateOpening = { lock, ms: 0 };
+    audio.play('unlock');
+    this.hud.say(
+      `THE ${lock.toUpperCase()} KEY! EVERY ${lock.toUpperCase()} GATE IS OPEN`,
+      2400,
+      'Y',
+    );
+  }
+
+  /**
+   * Complains when the player is pressing into a gate they cannot open.
+   *
+   * Only fires when they are actually walking at it, so standing next to one is
+   * quiet, and only every so often, so leaning on it is not a racket.
+   */
+  private nagAboutGates(): void {
+    if (this.gateNagCooldownMs > 0) return;
+
+    const pressed = input.playerInput();
+    const heading = (pressed.right ? 1 : 0) - (pressed.left ? 1 : 0);
+    if (heading === 0) return;
+
+    // Rounded, because a body resolved against a wall stops a hair short of it,
+    // and Math.floor of "a hair under 16" is the cell next door.
+    const box = this.player.box;
+    const x = Math.round(box.x);
+    const y = Math.round(box.y);
+    const probe = heading > 0 ? x + box.width : x - 1;
+    const col = Math.floor(probe / TILE_SIZE);
+    const top = Math.floor(y / TILE_SIZE);
+    const bottom = Math.floor((y + box.height - 1) / TILE_SIZE);
+
+    for (let row = top; row <= bottom; row++) {
+      const lock = lockColour(this.room.charAt(col, row));
+      if (lock === null) continue;
+      this.hud.say(`THE ${lock.toUpperCase()} GATE. LOCKED.`, 1400, 'R');
+      audio.play('locked');
+      this.gateNagCooldownMs = WORLD.gateNagCooldownMs;
+      return;
     }
   }
 
@@ -449,6 +514,7 @@ export class GameScene extends Phaser.Scene {
         lives: this.state.lives,
         elapsedMs: this.state.elapsedMs,
         muted: audio.muted,
+        keys: keysHeld(this.state.collectedItems),
         accent: this.theme.ledgeInk,
       },
       deltaMs,
@@ -510,6 +576,11 @@ export class GameScene extends Phaser.Scene {
     for (const [id, image] of this.itemImages) {
       const item = (this.room.data.items ?? []).find((i) => i.id === id);
       if (!item) continue;
+      const lock = KEY_ITEMS.get(id);
+      if (lock !== undefined) {
+        image.setTexture(keys.keyItem(lock, Math.floor(this.roomTimeMs / 260) % 2));
+        continue;
+      }
       const name = item.sprite in ITEM_SPRITES ? item.sprite : 'teacup';
       image.setTexture(keys.item(name, colour));
     }
@@ -542,46 +613,47 @@ export class GameScene extends Phaser.Scene {
           }
           break;
         }
-        default:
+        default: {
+          const lock = lockColour(tile.char);
+          if (lock === null) break;
+          tile.image.setVisible(true);
+          if (!this.room.isUnlocked(lock)) {
+            tile.image.setTexture(keys.gate(lock, 0));
+          } else if (this.gateOpening?.lock === lock) {
+            const progress = this.gateOpening.ms / WORLD.gateOpenMs;
+            const frame = Math.min(GATE_ART.length - 1, Math.floor(progress * GATE_ART.length));
+            tile.image.setTexture(keys.gate(lock, frame));
+          } else {
+            tile.image.setVisible(false);
+          }
           break;
+        }
       }
     }
   }
 
+  /**
+   * Pausing shows the map. There is nothing else worth looking at while the
+   * game is stopped, and it is the only moment the player has to think.
+   */
   private showPauseOverlay(): void {
-    if (this.pauseLabel) return;
-    this.pauseLabel = new PixelText(this, {
-      x: GAME_WIDTH / 2,
-      y: PLAY_HEIGHT / 2 - 12,
-      maxChars: 7,
-      originX: 0.5,
-      colour: 'Y',
-      scale: 2,
-      depth: DEPTH.overlay,
+    this.map?.show({
+      rooms: ALL_ROOM_DATA,
+      currentRoom: this.state.currentRoom,
+      visited: this.state.visitedRooms,
+      collected: this.state.collectedItems,
+      keys: keysHeld(this.state.collectedItems),
     });
-    this.pauseLabel.setText('PAUSED');
-
-    this.pauseHint = new PixelText(this, {
-      x: GAME_WIDTH / 2,
-      y: PLAY_HEIGHT / 2 + 10,
-      maxChars: 30,
-      lines: 2,
-      originX: 0.5,
-      colour: 'C',
-      depth: DEPTH.overlay,
-    });
-    this.pauseHint.setText(['ESC TO CARRY ON', 'M FOR SOUND']);
   }
 
   private hidePauseOverlay(): void {
-    this.pauseLabel?.destroy();
-    this.pauseHint?.destroy();
-    this.pauseLabel = null;
-    this.pauseHint = null;
+    this.map?.hide();
   }
 
   private teardown(): void {
     this.hidePauseOverlay();
+    this.map?.destroy();
+    this.map = null;
     this.clearRoomObjects();
     this.hud.destroy();
     this.debug?.destroy();

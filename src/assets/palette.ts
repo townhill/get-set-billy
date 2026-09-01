@@ -1,3 +1,5 @@
+import type { LockColour } from '../world/tiles';
+
 /**
  * A deliberately tiny palette, in the spirit of an 8-bit home computer:
  * eight hues, each in a normal and a bright version, plus black.
@@ -32,6 +34,20 @@ export type PaletteKey = keyof typeof PALETTE;
 
 /** The colours items flash through while waiting to be picked up. */
 export const ITEM_FLASH_COLOURS: PaletteKey[] = ['Y', 'C', 'M', 'G', 'W', 'R'];
+
+/**
+ * Gates and their keys, as an ink and a shade.
+ *
+ * These are fixed per lock rather than per theme, on purpose: a brass gate has
+ * to be recognisable as the brass gate in whichever room you meet it, and four
+ * plainly different hues are what makes that work at eight pixels square.
+ */
+export const LOCK_INKS: Readonly<Record<LockColour, [PaletteKey, PaletteKey]>> = {
+  brass: ['Y', 'y'],
+  silver: ['W', 'w'],
+  iron: ['B', 'b'],
+  copper: ['R', 'r'],
+};
 
 /** Colour used to draw the HUD panel's chrome. */
 export const HUD_INK: PaletteKey = 'W';

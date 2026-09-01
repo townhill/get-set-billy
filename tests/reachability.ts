@@ -3,6 +3,7 @@ import { DEFAULT_TUNING, Player, type PlayerInput, type PlayerTuning } from '../
 import { boxesOverlap, insetBox, type Box } from '../src/systems/CollisionSystem';
 import type { Room } from '../src/world/Room';
 import type { Direction } from '../src/world/roomTypes';
+import { LOCK_COLOURS, type LockColour } from '../src/world/tiles';
 
 /**
  * Works out what a player can actually reach in a room, by running the real
@@ -22,6 +23,9 @@ import type { Direction } from '../src/world/roomTypes';
  * also run the house for a CLUMSY player, who jumps and walks slightly less far.
  * Anything that survives that has real margin in it.
  */
+
+/** Every key in the house, for the checks that are about geometry, not gating. */
+export const ALL_KEYS: readonly LockColour[] = LOCK_COLOURS;
 
 /** A player who is a few per cent worse at everything. */
 export const CLUMSY_TUNING: PlayerTuning = {
@@ -158,7 +162,12 @@ export function explore(
   room: Room,
   from?: readonly string[],
   tuning: PlayerTuning = DEFAULT_TUNING,
+  keys: Iterable<LockColour> = ALL_KEYS,
 ): Reachability {
+  // Gates are geometry as far as the solver is concerned: an unlocked one is
+  // simply air, so which keys the player holds has to be settled up front.
+  room.setKeys(keys);
+
   const targets = itemBoxes(room);
   const found: Reachability = {
     spots: new Set(),

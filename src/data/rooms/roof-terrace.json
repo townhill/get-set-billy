@@ -96,7 +96,8 @@
       "id": "roof-key",
       "sprite": "key",
       "x": 176,
-      "y": 48
+      "y": 48,
+      "opens": "brass"
     }
   ]
 }

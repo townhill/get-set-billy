@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { FIXED_STEP_MS, PLAYER, ROOM_COLS, ROOM_ROWS, TILE_SIZE, WORLD } from '../src/config';
 import { Player } from '../src/objects/Player';
-import { ALL_ITEM_IDS, ALL_ROOM_DATA, RoomManager, TOTAL_ITEMS } from '../src/world/RoomManager';
+import {
+  ALL_ITEM_IDS,
+  ALL_ROOM_DATA,
+  KEY_ITEMS,
+  RoomManager,
+  TOTAL_ITEMS,
+  keysHeld,
+} from '../src/world/RoomManager';
 import { DIRECTIONS, OPPOSITE, type Direction, validateRoomShape } from '../src/world/roomTypes';
-import { isKnownTile, tileDef } from '../src/world/tiles';
+import { LOCK_COLOURS, isKnownTile, lockColour, tileDef } from '../src/world/tiles';
 import { THEMES } from '../src/assets/themes';
 import { ENEMY_SPRITES, ITEM_SPRITES } from '../src/assets/sprites';
 import { enemyBox } from '../src/objects/Enemy';
@@ -103,7 +110,7 @@ describe('room traversal', () => {
     expect(crossed).toBe(true);
   });
 
-  it("keeps the attic mouse away from the lower entrance", () => {
+  it('keeps the attic mouse away from the lower entrance', () => {
     const room = rooms.get('hat-attic');
     const spawn = room.data.spawns.down;
     const mouse = room.data.enemies?.find((enemy) => enemy.id === 'attic-mouse');
@@ -310,5 +317,129 @@ describe.each(ALL_ROOM_DATA.map((room) => [room.id, room] as const))('%s', (id, 
         );
       }
     }
+  });
+});
+
+/**
+ * The rules a gate has to follow.
+ *
+ * A gate is solid until you hold its key and plain air the moment you do, which
+ * makes it the one tile that can change what a room's geometry is. That is
+ * exactly why it needs pinning down: put one in the wrong place and it either
+ * stops sealing an edge the room is supposed to seal, or becomes a ledge that
+ * disappears from under a player who has just found a key.
+ */
+describe('gates', () => {
+  const gated = ALL_ROOM_DATA.filter((data) =>
+    data.tiles.some((row) => [...row].some((ch) => lockColour(ch) !== null)),
+  );
+
+  it('are used somewhere, or none of this is doing anything', () => {
+    expect(gated.length).toBeGreaterThan(0);
+  });
+
+  it.each(gated.map((data) => [data.id, data] as const))(
+    '%s keeps them off every edge',
+    (id, data) => {
+      for (let col = 0; col < ROOM_COLS; col++) {
+        for (const row of [0, ROOM_ROWS - 1]) {
+          expect(lockColour(data.tiles[row][col]), `${id} has a gate on row ${row}`).toBeNull();
+        }
+      }
+      for (let row = 0; row < ROOM_ROWS; row++) {
+        for (const col of [0, ROOM_COLS - 1]) {
+          expect(lockColour(data.tiles[row][col]), `${id} has a gate in column ${col}`).toBeNull();
+        }
+      }
+    },
+  );
+
+  it.each(gated.map((data) => [data.id, data] as const))(
+    '%s runs each one from something solid to something solid',
+    (id, data) => {
+      for (let col = 0; col < ROOM_COLS; col++) {
+        for (let row = 0; row < ROOM_ROWS; row++) {
+          if (lockColour(data.tiles[row][col]) === null) continue;
+          // Only test the top of each run, once.
+          if (lockColour(data.tiles[row - 1]?.[col] ?? '.') !== null) continue;
+
+          let end = row;
+          while (lockColour(data.tiles[end + 1]?.[col] ?? '.') !== null) end += 1;
+
+          const above = data.tiles[row - 1]?.[col] ?? '#';
+          const below = data.tiles[end + 1]?.[col] ?? '#';
+          expect(
+            tileDef(above).solid,
+            `${id} column ${col}: a gate starting at row ${row} can be jumped over`,
+          ).toBe(true);
+          expect(
+            tileDef(below).solid,
+            `${id} column ${col}: a gate ending at row ${end} can be walked under`,
+          ).toBe(true);
+        }
+      }
+    },
+  );
+
+  it.each(gated.map((data) => [data.id, data] as const))(
+    '%s keeps them out of the columns you fall through',
+    (id, data) => {
+      const holes = new Set<number>();
+      for (let col = 0; col < ROOM_COLS; col++) {
+        if (!tileDef(data.tiles[0][col]).solid) holes.add(col);
+        const floor = tileDef(data.tiles[ROOM_ROWS - 1][col]);
+        if (!floor.solid && !floor.platform) holes.add(col);
+      }
+      for (const col of holes) {
+        for (let row = 0; row < ROOM_ROWS; row++) {
+          expect(
+            lockColour(data.tiles[row][col]),
+            `${id} has a gate in column ${col}, which you can drop into`,
+          ).toBeNull();
+        }
+      }
+    },
+  );
+});
+
+describe('keys', () => {
+  it('exist, and open gates that exist', () => {
+    expect(KEY_ITEMS.size).toBeGreaterThan(0);
+    const gatesUsed = new Set(
+      ALL_ROOM_DATA.flatMap((data) =>
+        data.tiles.flatMap((row) => [...row].map(lockColour).filter((lock) => lock !== null)),
+      ),
+    );
+    expect([...KEY_ITEMS.values()].sort()).toEqual([...gatesUsed].sort());
+  });
+
+  it('use one of the colours the game knows about', () => {
+    for (const lock of KEY_ITEMS.values()) expect(LOCK_COLOURS).toContain(lock);
+  });
+
+  it('are worked out from the items collected, and nothing else', () => {
+    const [id, lock] = [...KEY_ITEMS.entries()][0];
+    expect(keysHeld([])).toEqual(new Set());
+    expect(keysHeld([id])).toEqual(new Set([lock]));
+    expect(keysHeld(['not-a-real-item'])).toEqual(new Set());
+    expect(keysHeld(ALL_ITEM_IDS)).toEqual(new Set(KEY_ITEMS.values()));
+  });
+
+  it('turn a gate into air, and only that gate', () => {
+    const room = new RoomManager().get('servants-corridor');
+    const gate = { col: 29, row: 10 };
+
+    room.setKeys([]);
+    expect(room.solidAt(gate.col, gate.row)).toBe(true);
+    expect(room.charAt(gate.col, gate.row)).toBe('B');
+
+    room.setKeys(['iron']);
+    expect(room.solidAt(gate.col, gate.row), 'the wrong key opens nothing').toBe(true);
+
+    room.setKeys(['brass']);
+    expect(room.solidAt(gate.col, gate.row)).toBe(false);
+    expect(room.charAt(gate.col, gate.row)).toBe('.');
+    expect(room.rawCharAt(gate.col, gate.row), 'the room data itself never changes').toBe('B');
+    expect(room.solidAt(0, gate.row), 'the wall beside it is still a wall').toBe(true);
   });
 });

@@ -69,6 +69,15 @@ describe('entering rooms', () => {
     expect(state.currentRoom).toBe('attic');
     expect(state.entrySpawn).toBe('down');
   });
+
+  it('remembers every room set foot in, for the map', () => {
+    const state = new GameState('hall');
+    expect([...state.visitedRooms]).toEqual(['hall']);
+    state.enterRoom('attic', 'down');
+    state.enterRoom('cellar', 'up');
+    state.enterRoom('attic', 'left');
+    expect([...state.visitedRooms].sort()).toEqual(['attic', 'cellar', 'hall']);
+  });
 });
 
 describe('snapshots', () => {
@@ -89,6 +98,14 @@ describe('snapshots', () => {
     expect(restored.lives).toBe(3);
     expect(restored.deaths).toBe(1);
     expect([...restored.collectedItems].sort()).toEqual(['a', 'b']);
+    expect([...restored.visitedRooms].sort()).toEqual(['attic', 'library']);
+  });
+
+  it('treats a save written before there was a map as having seen one room', () => {
+    const snapshot = new GameState('library').toSnapshot();
+    delete snapshot.visitedRooms;
+    const restored = GameState.fromSnapshot(snapshot);
+    expect([...restored.visitedRooms]).toEqual(['library']);
   });
 
   it('carries the clock across, rather than restarting it', () => {

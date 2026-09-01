@@ -10,11 +10,18 @@ import {
   type SpriteDef,
   mirrorArt,
 } from '../assets/sprites';
-import { ITEM_FLASH_COLOURS, PALETTE, type PaletteKey, paletteColour } from '../assets/palette';
+import {
+  ITEM_FLASH_COLOURS,
+  LOCK_INKS,
+  PALETTE,
+  type PaletteKey,
+  paletteColour,
+} from '../assets/palette';
 import {
   CONVEYOR_ART,
   CRUMBLE_ART,
   DECOR_ART,
+  GATE_ART,
   LEDGE_ART,
   LIQUID_ART,
   NASTY_ART,
@@ -22,6 +29,7 @@ import {
   SPIKES_UP,
   WALL_ART,
 } from '../assets/tileArt';
+import { LOCK_COLOURS, type LockColour } from '../world/tiles';
 import { type ThemeDef, THEMES } from '../assets/themes';
 import { PLAY_HEIGHT, PLAY_WIDTH, TILE_SIZE } from '../config';
 import { type Art, artToCanvas, context2d, createCanvas, paintArt, themedResolver } from './pixels';
@@ -60,6 +68,8 @@ export const keys = {
   nasty: (theme: string, frame: number): string => `tile-${theme}-nasty-${frame}`,
   conveyor: (theme: string, frame: number): string => `tile-${theme}-conveyor-${frame}`,
   crumble: (theme: string, stage: number): string => `tile-${theme}-crumble-${stage}`,
+  gate: (lock: LockColour, stage: number): string => `gate-${lock}-${stage}`,
+  keyItem: (lock: LockColour, frame: number): string => `key-item-${lock}-${frame}`,
   room: (id: string): string => `room-${id}`,
 };
 
@@ -157,11 +167,29 @@ function buildThemeTiles(scene: Phaser.Scene, name: string, theme: ThemeDef): vo
   });
 }
 
+/**
+ * Gates are coloured by their lock rather than by the room's theme, so a brass
+ * gate is the same brass gate wherever you run into it.
+ */
+function buildGates(scene: Phaser.Scene): void {
+  for (const lock of LOCK_COLOURS) {
+    const [ink, shade] = LOCK_INKS[lock];
+    GATE_ART.forEach((art, stage) => {
+      ensureArt(scene, keys.gate(lock, stage), art, paletteInk(['1', ink], ['2', shade]));
+    });
+    // A key pulses between its two inks rather than flashing through the whole
+    // palette like the other collectables: which lock it fits has to be obvious.
+    ensureArt(scene, keys.keyItem(lock, 0), ITEM_SPRITES.key, paletteInk(['1', ink]));
+    ensureArt(scene, keys.keyItem(lock, 1), ITEM_SPRITES.key, paletteInk(['1', shade]));
+  }
+}
+
 export function buildAllTextures(scene: Phaser.Scene): void {
   buildPlayer(scene);
   buildEnemies(scene);
   buildItems(scene);
   buildDoor(scene);
+  buildGates(scene);
   for (const [name, theme] of Object.entries(THEMES)) {
     buildThemeTiles(scene, name, theme);
   }
