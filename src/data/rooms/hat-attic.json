@@ -85,8 +85,8 @@
       "id": "attic-mouse",
       "sprite": "mouse",
       "y": 144,
-      "from": 32,
-      "to": 64,
+      "from": 104,
+      "to": 136,
       "speed": 48
     }
   ],

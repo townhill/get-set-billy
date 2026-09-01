@@ -6,7 +6,8 @@ import { DIRECTIONS, OPPOSITE, type Direction, validateRoomShape } from '../src/
 import { isKnownTile, tileDef } from '../src/world/tiles';
 import { THEMES } from '../src/assets/themes';
 import { ENEMY_SPRITES, ITEM_SPRITES } from '../src/assets/sprites';
-import { overlapsHazard } from '../src/systems/CollisionSystem';
+import { enemyBox } from '../src/objects/Enemy';
+import { boxesOverlap, insetBox, overlapsHazard } from '../src/systems/CollisionSystem';
 
 /**
  * These tests are the contract for adding a room to the house.
@@ -100,6 +101,31 @@ describe('room traversal', () => {
     }
 
     expect(crossed).toBe(true);
+  });
+
+  it("keeps the attic mouse away from the lower entrance", () => {
+    const room = rooms.get('hat-attic');
+    const spawn = room.data.spawns.down;
+    const mouse = room.data.enemies?.find((enemy) => enemy.id === 'attic-mouse');
+
+    expect(spawn).toBeDefined();
+    expect(mouse).toBeDefined();
+    if (!spawn || !mouse) return;
+
+    const playerBox = insetBox(
+      { x: spawn.x, y: spawn.y, width: PLAYER.width, height: PLAYER.height },
+      PLAYER.hazardInset,
+    );
+    const sprite = ENEMY_SPRITES[mouse.sprite];
+
+    for (let frame = 0; frame <= 120; frame++) {
+      const seconds = (frame * FIXED_STEP_MS) / 1000;
+      const mouseBox = insetBox(enemyBox(mouse, seconds, sprite), 1);
+      expect(
+        boxesOverlap(playerBox, mouseBox),
+        `attic mouse reaches the lower spawn after ${seconds.toFixed(2)}s`,
+      ).toBe(false);
+    }
   });
 });
 
