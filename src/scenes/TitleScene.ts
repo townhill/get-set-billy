@@ -6,7 +6,7 @@ import { keys } from '../render/textures';
 import { artToCanvas, themedResolver } from '../render/pixels';
 import { PALETTE } from '../assets/palette';
 import { audio } from '../systems/AudioSystem';
-import { input } from '../systems/InputSystem';
+import { input, keyLabel } from '../systems/InputSystem';
 import { SaveSystem } from '../systems/SaveSystem';
 import { TOTAL_ITEMS } from '../world/RoomManager';
 import { type GameStateSnapshot, formatDuration } from '../state/GameState';
@@ -115,6 +115,13 @@ export class TitleScene extends Phaser.Scene {
       });
     }
     this.options.push({ label: 'NEW GAME', action: () => this.startGame(undefined) });
+    this.options.push({
+      label: 'CONTROLS',
+      action: () => {
+        audio.play('select');
+        this.scene.start('OptionsScene');
+      },
+    });
 
     // A time to beat, once there is one. Nothing at all before that: an empty
     // scoreboard on a game nobody has finished is just a reproach.
@@ -144,6 +151,12 @@ export class TitleScene extends Phaser.Scene {
   }
 
   private drawInstructions(): void {
+    // Read from the live bindings rather than written out, so the title screen
+    // cannot end up telling somebody to press a key they have moved.
+    const walk = [input.keysFor('left')[0], input.keysFor('right')[0]].map(keyLabel).join('/');
+    const jump = keyLabel(input.keysFor('jump')[0]);
+    const restart = keyLabel(input.keysFor('restartRoom')[0]);
+
     const controls = new PixelText(this, {
       x: GAME_WIDTH / 2,
       y: PLAY_HEIGHT - 2,
@@ -153,8 +166,8 @@ export class TitleScene extends Phaser.Scene {
       colour: 'G',
     });
     controls.setText([
-      'ARROWS OR A/D TO WALK   SPACE/UP TO JUMP',
-      'R RESTARTS A ROOM (AND COSTS YOU A LIFE)',
+      `${walk} TO WALK, ${jump} TO JUMP`,
+      `${restart} GIVES UP ON A ROOM, AND COSTS A LIFE`,
       'ESC MAP  M SOUND  F GENTLER FLASHING',
       'UP/DOWN TO CHOOSE, SPACE OR ENTER TO GO',
     ]);

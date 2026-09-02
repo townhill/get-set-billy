@@ -103,8 +103,14 @@ Then open <http://localhost:5173>. Vite hot-reloads as you edit.
 | Pause, and see the map   | `Esc` or `P`                | Start                      |
 | Sound on/off             | `M`                         | —                          |
 | Gentler flashing         | `F`                         | —                          |
+| Change any of these      | **Controls**, on the title  | —                          |
 | Choose a menu option     | `↑` / `↓`                   | D-pad up/down              |
 | Confirm                  | `Space` or `Enter`          | A, or Start                |
+
+Every key in that table except the menu ones can be moved, from **Controls** on
+the title screen. The keys that work the menus are deliberately fixed: rebinding
+those is how somebody would lock themselves out of the screen that puts it back.
+There is a reset as well, but only as a convenience rather than as the way out.
 
 Notes on how it feels, all of which are deliberate:
 
@@ -144,6 +150,7 @@ src/
     BootScene.ts           Draws every texture, then hands over
     TitleScene.ts          Title, menu, Continue / New Game
     GameScene.ts           The game: sequencing and presentation
+    OptionsScene.ts        Which key does what, and the two settings
     GameOverScene.ts       Out of lives
     VictoryScene.ts        Out of the house
 
@@ -194,7 +201,7 @@ src/
 Phaser draws things and runs the loop. It does not decide anything.
 
 All the rules — movement, collision, enemy paths, room structure, game state,
-saving — live in modules that import no Phaser at all. That is why 450 tests can
+saving — live in modules that import no Phaser at all. That is why 463 tests can
 run in a plain Node environment with no canvas and no WebGL, and it is why
 `GameScene` is mostly sequencing rather than logic.
 
@@ -311,6 +318,21 @@ you entered the room rather than to some fixed point.
 Finishing the house records the run, and the fastest ten are kept. The title
 screen shows the time to beat once there is one, and nothing at all before that:
 an empty scoreboard on a game nobody has finished is just a reproach.
+
+### Controls that move
+
+`InputSystem` holds one table of actions to key codes: the defaults, with
+whatever the player has changed laid over the top. Only the differences are
+saved, so an action nobody has touched follows the default even if the default
+later changes.
+
+Codes rather than characters (`KeyA`, not `a`), so a binding survives a change
+of keyboard layout — which is why there is a small table turning `ShiftLeft`
+into `L SHIFT` for a typeface that has no lower case.
+
+A stored binding with no keys in it is ignored rather than honoured. An action
+with no key is an action that cannot be performed, and no settings file is worth
+making the game unplayable over.
 
 ### Saving
 
@@ -741,7 +763,7 @@ room. A broken room fails the build.
 npm test
 ```
 
-450 tests, in a plain Node environment — no browser, no canvas, no Phaser.
+463 tests, in a plain Node environment — no browser, no canvas, no Phaser.
 
 | File                         | Covers                                                                                                                                                                  |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -754,6 +776,7 @@ npm test
 | `tests/gamestate.test.ts`    | Collecting, lives, win condition, snapshots, rooms seen, the clock                                                                                                      |
 | `tests/save.test.ts`         | Round trips, corrupt saves, saves written before the map existed, no storage, storage that throws                                                                       |
 | `tests/map.test.ts`          | That every room gets a cell on the map, on screen, in the right place                                                                                                   |
+| `tests/input.test.ts`        | What may be rebound and what may not, that a change sticks, and that a corrupt binding falls back rather than making an action unpressable                              |
 | `tests/font.test.ts`         | Every glyph and every piece of artwork is the size it claims                                                                                                            |
 
 The tests are there to catch real mistakes — a room you cannot get out of, a

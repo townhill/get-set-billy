@@ -3,6 +3,7 @@ import { GAME_HEIGHT, GAME_WIDTH, isDebugEnabled } from './config';
 import { BootScene } from './scenes/BootScene';
 import { TitleScene } from './scenes/TitleScene';
 import { GameScene } from './scenes/GameScene';
+import { OptionsScene } from './scenes/OptionsScene';
 import { GameOverScene } from './scenes/GameOverScene';
 import { VictoryScene } from './scenes/VictoryScene';
 
@@ -28,7 +29,7 @@ const game = new Phaser.Game({
   scale: {
     mode: Phaser.Scale.NONE,
   },
-  scene: [BootScene, TitleScene, GameScene, GameOverScene, VictoryScene],
+  scene: [BootScene, TitleScene, GameScene, GameOverScene, VictoryScene, OptionsScene],
 });
 
 function fitToWindow(): void {

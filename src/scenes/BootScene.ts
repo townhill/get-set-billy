@@ -17,6 +17,7 @@ export class BootScene extends Phaser.Scene {
   create(): void {
     buildAllTextures(this);
     audio.init();
+    input.loadBindings();
     input.attach();
 
     document.getElementById('loading')?.remove();

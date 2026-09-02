@@ -16,9 +16,16 @@ export interface Settings {
    * safely look at.
    */
   reducedFlashing: boolean;
+  /**
+   * Keys the player has moved, and only those.
+   *
+   * Overrides rather than a full table, so an action nobody has touched keeps
+   * following the default even if the default later changes.
+   */
+  bindings: Partial<Record<string, string[]>>;
 }
 
-const DEFAULT_SETTINGS: Settings = { muted: false, reducedFlashing: false };
+const DEFAULT_SETTINGS: Settings = { muted: false, reducedFlashing: false, bindings: {} };
 
 /** One finished run. Kept so the title screen can show a time to beat. */
 export interface RunRecord {
@@ -31,6 +38,24 @@ export interface RunRecord {
 
 /** How many finished runs are remembered. Enough for a personal best and a bit of history. */
 const MAX_RECORDS = 10;
+
+/**
+ * Sifts stored key bindings, keeping only the ones that make sense.
+ *
+ * Anything malformed is dropped rather than repaired: an action left with no
+ * key at all is an action that cannot be performed, and a settings file is not
+ * worth making the game unplayable over.
+ */
+function readBindings(value: unknown): Partial<Record<string, string[]>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
+  const out: Partial<Record<string, string[]>> = {};
+  for (const [action, codes] of Object.entries(value as Record<string, unknown>)) {
+    if (!Array.isArray(codes)) continue;
+    const clean = codes.filter((code): code is string => typeof code === 'string' && code !== '');
+    if (clean.length > 0) out[action] = clean;
+  }
+  return out;
+}
 
 function isRecord(value: unknown): value is RunRecord {
   if (typeof value !== 'object' || value === null) return false;
@@ -122,6 +147,7 @@ export const SaveSystem = {
         return {
           muted: Boolean(v.muted),
           reducedFlashing: Boolean(v.reducedFlashing),
+          bindings: readBindings(v.bindings),
         };
       }
     } catch {

@@ -119,9 +119,17 @@ describe('with working storage', () => {
   });
 
   it('remembers the sound setting on its own key', () => {
-    expect(SaveSystem.loadSettings()).toEqual({ muted: false, reducedFlashing: false });
+    expect(SaveSystem.loadSettings()).toEqual({
+      muted: false,
+      reducedFlashing: false,
+      bindings: {},
+    });
     SaveSystem.saveSettings({ muted: true });
-    expect(SaveSystem.loadSettings()).toEqual({ muted: true, reducedFlashing: false });
+    expect(SaveSystem.loadSettings()).toEqual({
+      muted: true,
+      reducedFlashing: false,
+      bindings: {},
+    });
     expect(SaveSystem.load()).toBeNull(); // settings are not a saved game
   });
 });
@@ -132,20 +140,45 @@ describe('settings', () => {
   it('leaves the other settings alone when only one is written', () => {
     SaveSystem.saveSettings({ reducedFlashing: true });
     SaveSystem.saveSettings({ muted: true });
-    expect(SaveSystem.loadSettings()).toEqual({ muted: true, reducedFlashing: true });
+    expect(SaveSystem.loadSettings()).toEqual({ muted: true, reducedFlashing: true, bindings: {} });
 
     SaveSystem.saveSettings({ muted: false });
     expect(SaveSystem.loadSettings(), 'turning the sound back on should not undo the rest').toEqual(
-      {
-        muted: false,
-        reducedFlashing: true,
-      },
+      { muted: false, reducedFlashing: true, bindings: {} },
     );
+  });
+
+  it('keeps rebound keys, and drops anything that would leave an action unusable', () => {
+    SaveSystem.saveSettings({ bindings: { jump: ['KeyZ'], left: ['KeyN', 'KeyH'] } });
+    expect(SaveSystem.loadSettings().bindings).toEqual({
+      jump: ['KeyZ'],
+      left: ['KeyN', 'KeyH'],
+    });
+
+    // A binding with nothing in it is a key that cannot be pressed.
+    globalThis.localStorage.setItem(
+      SAVE.settingsKey,
+      JSON.stringify({
+        bindings: { jump: [], left: ['KeyN'], right: 'nonsense', pause: [7, 'KeyQ'] },
+      }),
+    );
+    expect(SaveSystem.loadSettings().bindings).toEqual({ left: ['KeyN'], pause: ['KeyQ'] });
+  });
+
+  it('shrugs off a bindings field that is not even an object', () => {
+    for (const rubbish of ['[]', '"words"', '7', 'null']) {
+      globalThis.localStorage.setItem(SAVE.settingsKey, `{"bindings": ${rubbish}}`);
+      expect(SaveSystem.loadSettings().bindings).toEqual({});
+    }
   });
 
   it('fills in anything a save written before the setting existed is missing', () => {
     globalThis.localStorage.setItem(SAVE.settingsKey, JSON.stringify({ muted: true }));
-    expect(SaveSystem.loadSettings()).toEqual({ muted: true, reducedFlashing: false });
+    expect(SaveSystem.loadSettings()).toEqual({
+      muted: true,
+      reducedFlashing: false,
+      bindings: {},
+    });
   });
 });
 
@@ -204,7 +237,11 @@ describe('with no storage at all', () => {
     expect(SaveSystem.load()).toBeNull();
     expect(SaveSystem.hasSave()).toBe(false);
     expect(() => SaveSystem.clear()).not.toThrow();
-    expect(SaveSystem.loadSettings()).toEqual({ muted: false, reducedFlashing: false });
+    expect(SaveSystem.loadSettings()).toEqual({
+      muted: false,
+      reducedFlashing: false,
+      bindings: {},
+    });
     expect(() => SaveSystem.saveSettings({ muted: true })).not.toThrow();
     expect(SaveSystem.bestRun(), 'no storage means no best time, not a crash').toBeNull();
     expect(() => SaveSystem.recordRun({ elapsedMs: 1, deaths: 0, finishedAt: 0 })).not.toThrow();
