@@ -22,11 +22,15 @@ import {
   CRUMBLE_ART,
   DECOR_ART,
   GATE_ART,
+  HATCH_ART,
   LEDGE_ART,
+  LEVER_ART,
+  LIFT_ART,
   LIQUID_ART,
   NASTY_ART,
   SPIKES_DOWN,
   SPIKES_UP,
+  TELEPORT_ART,
   WALL_ART,
 } from '../assets/tileArt';
 import { LOCK_COLOURS, type LockColour } from '../world/tiles';
@@ -69,6 +73,10 @@ export const keys = {
   conveyor: (theme: string, frame: number): string => `tile-${theme}-conveyor-${frame}`,
   crumble: (theme: string, stage: number): string => `tile-${theme}-crumble-${stage}`,
   gate: (lock: LockColour, stage: number): string => `gate-${lock}-${stage}`,
+  lift: (theme: string): string => `tile-${theme}-lift`,
+  lever: (on: boolean): string => `tile-lever-${on ? 'on' : 'off'}`,
+  teleport: (frame: number): string => `tile-teleport-${frame}`,
+  hatch: (theme: string): string => `tile-${theme}-hatch`,
   keyItem: (lock: LockColour, frame: number): string => `key-item-${lock}-${frame}`,
   room: (id: string): string => `room-${id}`,
 };
@@ -165,12 +173,40 @@ function buildThemeTiles(scene: Phaser.Scene, name: string, theme: ThemeDef): vo
       paletteInk(['1', theme.crumbleInk], ['2', theme.crumbleShade]),
     );
   });
+  // Lifts and hatches borrow the theme's machinery colours, the same ones the
+  // conveyors use, so they read as apparatus rather than as scenery.
+  ensureArt(
+    scene,
+    keys.lift(name),
+    LIFT_ART,
+    paletteInk(['1', theme.conveyorInk], ['2', theme.conveyorShade]),
+  );
+  ensureArt(
+    scene,
+    keys.hatch(name),
+    HATCH_ART,
+    paletteInk(['1', theme.conveyorInk], ['2', theme.conveyorShade]),
+  );
 }
 
 /**
  * Gates are coloured by their lock rather than by the room's theme, so a brass
  * gate is the same brass gate wherever you run into it.
  */
+/** The lever is the same bright yellow everywhere: it is the thing you touch. */
+function buildLevers(scene: Phaser.Scene): void {
+  LEVER_ART.forEach((art, index) => {
+    ensureArt(scene, keys.lever(index === 1), art, paletteInk(['1', 'Y'], ['2', 'w']));
+  });
+}
+
+/** Cupboards are the same magenta wherever they are: they are a promise. */
+function buildTeleports(scene: Phaser.Scene): void {
+  TELEPORT_ART.forEach((art, index) => {
+    ensureArt(scene, keys.teleport(index), art, paletteInk(['1', 'M'], ['2', 'W']));
+  });
+}
+
 function buildGates(scene: Phaser.Scene): void {
   for (const lock of LOCK_COLOURS) {
     const [ink, shade] = LOCK_INKS[lock];
@@ -190,6 +226,8 @@ export function buildAllTextures(scene: Phaser.Scene): void {
   buildItems(scene);
   buildDoor(scene);
   buildGates(scene);
+  buildLevers(scene);
+  buildTeleports(scene);
   for (const [name, theme] of Object.entries(THEMES)) {
     buildThemeTiles(scene, name, theme);
   }

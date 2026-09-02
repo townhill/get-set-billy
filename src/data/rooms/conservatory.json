@@ -73,13 +73,14 @@
       "phase": 0.5
     },
     {
-      "type": "patrol-h",
+      "type": "figure-eight",
       "id": "conservatory-wasp",
       "sprite": "wasp",
-      "y": 72,
-      "from": 32,
-      "to": 200,
-      "speed": 76
+      "cx": 116,
+      "cy": 76,
+      "width": 84,
+      "height": 20,
+      "speed": 70
     },
     {
       "type": "circle",

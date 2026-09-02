@@ -74,6 +74,34 @@ export type EnemyDef =
       phase?: number;
     }
   | {
+      type: 'waypoint';
+      id: string;
+      sprite: string;
+      /**
+       * A closed loop of sprite top-left positions, walked at a constant speed
+       * and joined up from the last back to the first. Two points is exactly a
+       * patrol; three or more is a shape.
+       */
+      points: Point[];
+      /** Pixels per second along the path. */
+      speed: number;
+      phase?: number;
+    }
+  | {
+      type: 'figure-eight';
+      id: string;
+      sprite: string;
+      /** Centre of the figure. */
+      cx: number;
+      cy: number;
+      /** Half-extents: the figure reaches cx ± width and cy ± height. */
+      width: number;
+      height: number;
+      /** Degrees per second. Negative goes the other way round. */
+      speed: number;
+      phase?: number;
+    }
+  | {
       type: 'static';
       id: string;
       sprite: string;
@@ -82,6 +110,47 @@ export type EnemyDef =
     };
 
 export type EnemyKind = EnemyDef['type'];
+
+/**
+ * A moving ledge.
+ *
+ * Deliberately the same idea as an enemy: where it is depends only on how long
+ * you have been in the room, so it snaps back to the start every time you enter
+ * or die, and it is as learnable as everything else.
+ *
+ * There is one movement type rather than several, because a closed loop of
+ * points already covers all of them — two points is a straight run, up and down
+ * or side to side, and more than two is a circuit.
+ */
+export interface LiftDef {
+  /** Unique within the room. */
+  id: string;
+  /** Top-left of the platform at each corner of its loop, joined last to first. */
+  points: Point[];
+  /** Pixels per second along the path. */
+  speed: number;
+  /** How wide the platform is. Multiples of 8 line up with everything else. */
+  width: number;
+  /** 0..1, shifts the lift along its cycle at room entry. */
+  phase?: number;
+}
+
+/**
+ * A cupboard you step into and come out of somewhere else.
+ *
+ * Teleports come in pairs, each naming the other, and both ends must be
+ * somewhere the player could already stand — so arriving through one is never
+ * more dangerous than walking in through the door.
+ */
+export interface TeleportDef {
+  /** Unique across the whole house. */
+  id: string;
+  /** Top-left of the cupboard, which is one cell. */
+  x: number;
+  y: number;
+  /** The id of the teleport this one leads to. */
+  to: string;
+}
 
 export interface ItemDef {
   /** Unique across the whole house. */
@@ -120,6 +189,8 @@ export interface RoomData {
   tiles: string[];
   enemies?: EnemyDef[];
   items?: ItemDef[];
+  lifts?: LiftDef[];
+  teleports?: TeleportDef[];
   /** The front door. Present in exactly one room: it is how the game is won. */
   door?: Point;
 }
@@ -157,6 +228,27 @@ export function validateRoomShape(data: RoomData): string[] {
     if (data.exits[dir] !== undefined && data.spawns[dir] === undefined) {
       issues.push(`has a "${dir}" exit but no "${dir}" spawn point`);
     }
+  }
+
+  for (const enemy of data.enemies ?? []) {
+    if (enemy.type === 'waypoint' && enemy.points.length < 2) {
+      issues.push(`enemy "${enemy.id}" needs at least two waypoints to go anywhere`);
+    }
+  }
+
+  const liftIds = new Set<string>();
+  for (const lift of data.lifts ?? []) {
+    if (liftIds.has(lift.id)) issues.push(`duplicate lift id "${lift.id}"`);
+    liftIds.add(lift.id);
+    if (lift.points.length < 2) issues.push(`lift "${lift.id}" needs at least two points`);
+    if (lift.width <= 0) issues.push(`lift "${lift.id}" has no width`);
+  }
+
+  for (const pad of data.teleports ?? []) {
+    if (pad.x % 8 !== 0 || pad.y % 8 !== 0) {
+      issues.push(`teleport "${pad.id}" is not on a cell boundary`);
+    }
+    if (pad.to === pad.id) issues.push(`teleport "${pad.id}" leads to itself`);
   }
 
   const ids = new Set<string>();

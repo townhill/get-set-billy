@@ -63,6 +63,16 @@ const EFFECTS = {
     { freq: 196, duration: 0.5, at: 0.54 },
   ],
   select: [{ freq: 880, duration: 0.05, gain: 0.4 }],
+  // Going in one cupboard and out of another, somewhere else entirely.
+  teleport: [
+    { freq: 900, to: 200, duration: 0.12, gain: 0.5 },
+    { freq: 300, to: 1200, duration: 0.16, at: 0.1, gain: 0.5 },
+  ],
+  // A lever being thrown: a heavy clunk, then whatever it moved settling.
+  lever: [
+    { freq: 260, to: 150, duration: 0.08, wave: 'square' as Waveform, gain: 0.7 },
+    { freq: 420, duration: 0.06, at: 0.09, gain: 0.45 },
+  ],
 } satisfies Record<string, Note[]>;
 
 export type SoundName = keyof typeof EFFECTS;

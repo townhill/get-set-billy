@@ -45,6 +45,17 @@ export interface TileDef {
   crumbles: boolean;
   /** The key that opens this cell, or null if it is not a gate. */
   lock: LockColour | null;
+  /** Touching this cell flips the room's switch. */
+  lever: boolean;
+  /**
+   * A hatch: a ledge that is only there while the room's switch is in this
+   * position. Null for everything that is not a hatch.
+   *
+   * A ledge rather than a wall, deliberately. A hatch can then never wall a
+   * player in, and can never block a climb that was working before, because a
+   * one-way platform does not stop anything moving upwards.
+   */
+  shutter: boolean | null;
 }
 
 const EMPTY: Omit<TileDef, 'char' | 'name'> = {
@@ -54,6 +65,8 @@ const EMPTY: Omit<TileDef, 'char' | 'name'> = {
   conveyor: 0,
   crumbles: false,
   lock: null,
+  lever: false,
+  shutter: null,
 };
 
 /** A gate: solid until you hold its key, and plain air the moment you do. */
@@ -82,6 +95,9 @@ export const TILES: Readonly<Record<string, TileDef>> = {
   S: gate('S', 'silver'),
   I: gate('I', 'iron'),
   C: gate('C', 'copper'),
+  '!': { char: '!', name: 'lever', ...EMPTY, lever: true },
+  '[': { char: '[', name: 'hatch (shut at first)', ...EMPTY, platform: true, shutter: false },
+  ']': { char: ']', name: 'hatch (open at first)', ...EMPTY, platform: true, shutter: true },
 };
 
 export const AIR = TILES['.'];
@@ -93,6 +109,15 @@ export function tileDef(char: string): TileDef {
 /** The key a cell needs, or null if it is not a gate. */
 export function lockColour(char: string): LockColour | null {
   return tileDef(char).lock;
+}
+
+/** True when a cell is a shutter that is solid with the switch in this position. */
+export function shutterFor(char: string): boolean | null {
+  return tileDef(char).shutter;
+}
+
+export function isLever(char: string): boolean {
+  return tileDef(char).lever;
 }
 
 /** The tile character for each gate colour, for tests and documentation. */

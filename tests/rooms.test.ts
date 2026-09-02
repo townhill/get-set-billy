@@ -4,6 +4,7 @@ import { Player } from '../src/objects/Player';
 import {
   ALL_ITEM_IDS,
   ALL_ROOM_DATA,
+  ALL_TELEPORTS,
   KEY_ITEMS,
   RoomManager,
   TOTAL_ITEMS,
@@ -13,7 +14,8 @@ import { DIRECTIONS, OPPOSITE, type Direction, validateRoomShape } from '../src/
 import { LOCK_COLOURS, isKnownTile, lockColour, tileDef } from '../src/world/tiles';
 import { THEMES } from '../src/assets/themes';
 import { ENEMY_SPRITES, ITEM_SPRITES } from '../src/assets/sprites';
-import { enemyBox } from '../src/objects/Enemy';
+import { enemyBox, enemyPeriod, enemyPosition } from '../src/objects/Enemy';
+import { liftBox, liftPeriod } from '../src/objects/Lift';
 import { boxesOverlap, insetBox, overlapsHazard } from '../src/systems/CollisionSystem';
 
 /**
@@ -268,56 +270,151 @@ describe.each(ALL_ROOM_DATA.map((room) => [room.id, room] as const))('%s', (id, 
   });
 
   it('keeps its enemies inside the room', () => {
+    const maxX = ROOM_COLS * TILE_SIZE;
+    const maxY = ROOM_ROWS * TILE_SIZE;
+
     for (const enemy of data.enemies ?? []) {
       const sprite = ENEMY_SPRITES[enemy.sprite];
-      const bounds = { minX: 0, minY: 0, maxX: ROOM_COLS * TILE_SIZE, maxY: ROOM_ROWS * TILE_SIZE };
-      const ends: { x: number; y: number }[] = [];
 
-      switch (enemy.type) {
-        case 'patrol-h':
-          ends.push({ x: enemy.from, y: enemy.y }, { x: enemy.to, y: enemy.y });
-          break;
-        case 'patrol-v':
-          ends.push({ x: enemy.x, y: enemy.from }, { x: enemy.x, y: enemy.to });
-          break;
-        case 'circle':
-          ends.push(
-            {
-              x: enemy.cx - enemy.radius - sprite.width / 2,
-              y: enemy.cy - enemy.radius - sprite.height / 2,
-            },
-            {
-              x: enemy.cx + enemy.radius - sprite.width / 2,
-              y: enemy.cy + enemy.radius - sprite.height / 2,
-            },
-          );
-          break;
-        case 'pendulum':
-          ends.push(
-            { x: enemy.cx - enemy.length - sprite.width / 2, y: enemy.cy - sprite.height / 2 },
-            {
-              x: enemy.cx + enemy.length - sprite.width / 2,
-              y: enemy.cy + enemy.length - sprite.height / 2,
-            },
-          );
-          break;
-        case 'static':
-          ends.push({ x: enemy.x, y: enemy.y });
-          break;
+      // Sampling one whole cycle of the real position beats restating each
+      // path's extremes here. It cannot drift out of step with Enemy.ts, and it
+      // covers every movement type, including any added after this was written.
+      const period = enemyPeriod(enemy);
+      const samples = 720;
+      let left = Infinity;
+      let top = Infinity;
+      let right = -Infinity;
+      let bottom = -Infinity;
+
+      for (let i = 0; i <= samples; i++) {
+        const at = enemyPosition(enemy, (period * i) / samples, sprite);
+        left = Math.min(left, at.x);
+        top = Math.min(top, at.y);
+        right = Math.max(right, at.x + sprite.width);
+        bottom = Math.max(bottom, at.y + sprite.height);
       }
 
-      for (const end of ends) {
-        expect(end.x, `${enemy.id} goes off the left`).toBeGreaterThanOrEqual(bounds.minX);
-        expect(end.y, `${enemy.id} goes off the top`).toBeGreaterThanOrEqual(bounds.minY);
-        expect(end.x + sprite.width, `${enemy.id} goes off the right`).toBeLessThanOrEqual(
-          bounds.maxX,
-        );
-        expect(end.y + sprite.height, `${enemy.id} goes off the bottom`).toBeLessThanOrEqual(
-          bounds.maxY,
-        );
-      }
+      expect(left, `${enemy.id} goes off the left`).toBeGreaterThanOrEqual(0);
+      expect(top, `${enemy.id} goes off the top`).toBeGreaterThanOrEqual(0);
+      expect(right, `${enemy.id} goes off the right`).toBeLessThanOrEqual(maxX);
+      expect(bottom, `${enemy.id} goes off the bottom`).toBeLessThanOrEqual(maxY);
     }
   });
+});
+
+/**
+ * The rules a teleport cupboard has to follow.
+ *
+ * A cupboard drops the player at a fixed spot rather than at a spawn point, so
+ * it bypasses every check the doorways get.
+ *
+ * The rule is that you step out of a cupboard rather than fall out of it. A pad
+ * eight pixels low sits visually on a ledge but drops the player straight
+ * through it to whatever is underneath, and every other test is perfectly happy
+ * with that: the spot really is reachable, and the landing really is survivable.
+ * Only the falling gives it away.
+ */
+describe('teleport cupboards', () => {
+  const pads = ALL_ROOM_DATA.flatMap((data) =>
+    (data.teleports ?? []).map((pad) => [`${data.id}/${pad.id}`, data.id, pad] as const),
+  );
+
+  it('come in pairs that lead back to each other', () => {
+    expect(pads.length).toBeGreaterThan(0);
+    for (const [, , pad] of pads) {
+      const other = ALL_TELEPORTS.get(pad.to);
+      expect(other, `"${pad.id}" leads nowhere`).toBeDefined();
+      expect(other?.to).toBe(pad.id);
+    }
+  });
+
+  it.each(pads)('%s puts you down on your feet', (_label, roomId, pad) => {
+    const room = rooms.get(roomId);
+    room.reset();
+
+    const player = new Player();
+    player.placeAt(pad.x, pad.y);
+
+    for (let i = 0; i < 180; i++) {
+      const result = player.step(
+        { left: false, right: false, jump: false },
+        FIXED_STEP_MS / 1000,
+        room,
+      );
+      expect(result.died, `arriving at "${pad.id}" is fatal`).toBeNull();
+      expect(result.leftRoom, `arriving at "${pad.id}" falls straight out of the room`).toBeNull();
+      if (player.onGround) {
+        expect(
+          player.y - pad.y,
+          `"${pad.id}" is in mid-air: you fall out of it instead of stepping out`,
+        ).toBeLessThanOrEqual(TILE_SIZE);
+        return;
+      }
+    }
+
+    throw new Error(`arriving at "${pad.id}" never comes to rest`);
+  });
+});
+
+/**
+ * The rules a lift has to follow.
+ *
+ * A lift is the one thing in a room that moves and can be stood on, and it
+ * ignores the tile grid entirely — nothing stops a badly placed one gliding
+ * through a wall. So its whole circuit has to be checked, not just its corners.
+ */
+describe('lifts', () => {
+  const withLifts = ALL_ROOM_DATA.filter((data) => (data.lifts ?? []).length > 0);
+
+  it('are used somewhere', () => {
+    expect(withLifts.length).toBeGreaterThan(0);
+  });
+
+  it.each(withLifts.map((data) => [data.id, data] as const))(
+    '%s keeps every lift inside the room and clear of the walls',
+    (id, data) => {
+      const room = rooms.get(id);
+      for (const def of data.lifts ?? []) {
+        const period = liftPeriod(def);
+        const samples = 360;
+        for (let i = 0; i <= samples; i++) {
+          const box = liftBox(def, (period * i) / samples);
+
+          expect(box.x, `${def.id} goes off the left`).toBeGreaterThanOrEqual(0);
+          expect(box.y, `${def.id} goes off the top`).toBeGreaterThanOrEqual(0);
+          expect(box.x + box.width, `${def.id} goes off the right`).toBeLessThanOrEqual(
+            ROOM_COLS * TILE_SIZE,
+          );
+          expect(box.y + box.height, `${def.id} goes off the bottom`).toBeLessThanOrEqual(
+            ROOM_ROWS * TILE_SIZE,
+          );
+
+          for (
+            let col = Math.floor(box.x / TILE_SIZE);
+            col * TILE_SIZE < box.x + box.width;
+            col++
+          ) {
+            for (
+              let row = Math.floor(box.y / TILE_SIZE);
+              row * TILE_SIZE < box.y + box.height;
+              row++
+            ) {
+              expect(room.solidAt(col, row), `${def.id} passes through a wall`).toBe(false);
+            }
+          }
+        }
+      }
+    },
+  );
+
+  it.each(withLifts.map((data) => [data.id, data] as const))(
+    '%s gives every lift somewhere to go',
+    (_id, data) => {
+      for (const def of data.lifts ?? []) {
+        expect(liftPeriod(def), `${def.id} never moves`).toBeGreaterThan(0);
+      }
+    },
+  );
 });
 
 /**

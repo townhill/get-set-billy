@@ -15,7 +15,8 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify": "npm run typecheck && npm run lint && npm run test && vite build"
+    "verify": "npm run typecheck && npm run lint && npm run test && vite build",
+    "check-room": "node scripts/check-room.mjs"
   },
   "dependencies": {
     "phaser": "^4.2.1"

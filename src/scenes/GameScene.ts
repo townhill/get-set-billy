@@ -14,16 +14,24 @@ import { type ThemeDef, themeFor } from '../assets/themes';
 import { buildRoomTexture, keys } from '../render/textures';
 import { Player } from '../objects/Player';
 import { enemyBox, enemyFacing } from '../objects/Enemy';
+import { liftBox } from '../objects/Lift';
 import { boxesOverlap, insetBox, type Box } from '../systems/CollisionSystem';
 import { audio } from '../systems/AudioSystem';
 import { input } from '../systems/InputSystem';
 import { SaveSystem } from '../systems/SaveSystem';
 import { GameState, type GameStateSnapshot, type SpawnKey } from '../state/GameState';
-import { ALL_ROOM_DATA, KEY_ITEMS, RoomManager, TOTAL_ITEMS, keysHeld } from '../world/RoomManager';
+import {
+  ALL_ROOM_DATA,
+  ALL_TELEPORTS,
+  KEY_ITEMS,
+  RoomManager,
+  TOTAL_ITEMS,
+  keysHeld,
+} from '../world/RoomManager';
 import type { Room } from '../world/Room';
 import { OPPOSITE, type Direction, type ItemDef } from '../world/roomTypes';
 import { GATE_ART } from '../assets/tileArt';
-import { type LockColour, lockColour } from '../world/tiles';
+import { type LockColour, lockColour, shutterFor } from '../world/tiles';
 import { Hud } from '../ui/Hud';
 import { MapOverlay } from '../ui/MapOverlay';
 import { DebugOverlay } from '../ui/DebugOverlay';
@@ -71,8 +79,6 @@ export class GameScene extends Phaser.Scene {
 
   private mode: Mode = 'playing';
   private accumulatorMs = 0;
-  /** Time since the room was entered. Drives every enemy, and nothing else. */
-  private roomTimeMs = 0;
   private deathTimerMs = 0;
   private lockedNoiseCooldownMs = 0;
   private gateNagCooldownMs = 0;
@@ -84,6 +90,9 @@ export class GameScene extends Phaser.Scene {
   private doorImage: Phaser.GameObjects.Image | null = null;
   private dynamicTiles: DynamicTile[] = [];
   private enemyImages: Phaser.GameObjects.Image[] = [];
+  /** One row of deck segments per lift, since a lift is as wide as it says. */
+  private liftImages: Phaser.GameObjects.Image[][] = [];
+  private teleportImages: Phaser.GameObjects.Image[] = [];
   private itemImages = new Map<string, Phaser.GameObjects.Image>();
   private map: MapOverlay | null = null;
 
@@ -124,7 +133,13 @@ export class GameScene extends Phaser.Scene {
   private loadRoom(
     id: string,
     spawn: SpawnKey,
-    options: { announce?: boolean; carryVy?: number; carryFall?: number } = {},
+    options: {
+      announce?: boolean;
+      carryVy?: number;
+      carryFall?: number;
+      /** Overrides the spawn point, for arriving out of a teleport. */
+      at?: { x: number; y: number };
+    } = {},
   ): void {
     this.clearRoomObjects();
 
@@ -135,17 +150,19 @@ export class GameScene extends Phaser.Scene {
     this.gateOpening = null;
     this.theme = themeFor(this.room.data.theme);
     this.state.enterRoom(id, spawn);
-    this.roomTimeMs = 0;
     this.mode = 'playing';
 
     this.roomImage.setTexture(buildRoomTexture(this, this.room, this.theme));
 
     this.buildDynamicTiles();
+    this.buildLifts();
+    this.buildTeleports();
     this.buildDoor();
     this.buildItems();
     this.buildEnemies();
 
-    const point = this.room.data.spawns[spawn] ??
+    const point = options.at ??
+      this.room.data.spawns[spawn] ??
       this.room.data.spawns.start ??
       Object.values(this.room.data.spawns)[0] ?? { x: 8, y: PLAY_HEIGHT - PLAYER.height };
 
@@ -161,6 +178,10 @@ export class GameScene extends Phaser.Scene {
     this.dynamicTiles = [];
     for (const image of this.enemyImages) image.destroy();
     this.enemyImages = [];
+    for (const deck of this.liftImages) for (const image of deck) image.destroy();
+    this.liftImages = [];
+    for (const image of this.teleportImages) image.destroy();
+    this.teleportImages = [];
     for (const image of this.itemImages.values()) image.destroy();
     this.itemImages.clear();
     this.doorImage?.destroy();
@@ -180,6 +201,11 @@ export class GameScene extends Phaser.Scene {
         return keys.conveyor(theme, 0);
       case '%':
         return keys.crumble(theme, 0);
+      case '!':
+        return keys.lever(false);
+      case '[':
+      case ']':
+        return keys.hatch(theme);
       default: {
         const lock = lockColour(char);
         return lock === null ? null : keys.gate(lock, 0);
@@ -198,6 +224,28 @@ export class GameScene extends Phaser.Scene {
         .setDepth(DEPTH.tiles);
       this.dynamicTiles.push({ image, col, row, char });
     });
+  }
+
+  private buildLifts(): void {
+    const texture = keys.lift(this.room.data.theme);
+    for (const def of this.room.data.lifts ?? []) {
+      const segments = Math.max(1, Math.ceil(def.width / TILE_SIZE));
+      const deck: Phaser.GameObjects.Image[] = [];
+      for (let i = 0; i < segments; i++) {
+        deck.push(this.add.image(0, 0, texture).setOrigin(0, 0).setDepth(DEPTH.tiles));
+      }
+      this.liftImages.push(deck);
+    }
+  }
+
+  private buildTeleports(): void {
+    for (const pad of this.room.data.teleports ?? []) {
+      const image = this.add
+        .image(pad.x, pad.y, keys.teleport(0))
+        .setOrigin(0, 0)
+        .setDepth(DEPTH.tiles);
+      this.teleportImages.push(image);
+    }
   }
 
   private buildDoor(): void {
@@ -295,12 +343,24 @@ export class GameScene extends Phaser.Scene {
   /** One fixed step. Returns true if the room changed, so the caller stops early. */
   private simulate(stepMs: number): boolean {
     audio.unlock();
-    this.roomTimeMs += stepMs;
 
     const result = this.player.step(input.playerInput(), stepMs / 1000, this.room);
 
     if (result.floorsCollapsed > 0) audio.play('crumble');
     if (result.jumped) audio.play('jump');
+    if (result.flippedSwitch) {
+      audio.play('lever');
+      this.hud.say(
+        this.room.switchState ? 'CLUNK. SOMETHING MOVED' : 'CLUNK. IT MOVED BACK',
+        1200,
+        'C',
+      );
+    }
+
+    if (result.teleported !== null) {
+      this.useTeleport(result.teleported);
+      return true;
+    }
 
     if (result.leftRoom !== null) {
       this.changeRoom(result.leftRoom);
@@ -326,7 +386,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private touchesEnemy(hitbox: Box): boolean {
-    const seconds = this.roomTimeMs / 1000;
+    const seconds = this.room.seconds;
     const defs = this.room.data.enemies ?? [];
     for (const def of defs) {
       const sprite = ENEMY_SPRITES[def.sprite] ?? ENEMY_SPRITES.bowler;
@@ -448,6 +508,17 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  /** Steps into a cupboard here and out of the one it is paired with. */
+  private useTeleport(id: string): void {
+    const from = ALL_TELEPORTS.get(id);
+    const to = from === undefined ? undefined : ALL_TELEPORTS.get(from.to);
+    if (to === undefined) return;
+
+    audio.play('teleport');
+    this.loadRoom(to.room, this.state.entrySpawn, { announce: false, at: { x: to.x, y: to.y } });
+    this.hud.say('OUT THE OTHER SIDE', 1400, 'M');
+  }
+
   private die(): void {
     if (this.mode !== 'playing') return;
     this.mode = 'dying';
@@ -502,6 +573,8 @@ export class GameScene extends Phaser.Scene {
 
   private render(deltaMs: number): void {
     this.renderPlayer();
+    this.renderLifts();
+    this.renderTeleports();
     this.renderEnemies();
     this.renderItems();
     this.renderDynamicTiles();
@@ -524,7 +597,7 @@ export class GameScene extends Phaser.Scene {
       roomId: this.room.id,
       player: this.player.box,
       enemies: (this.room.data.enemies ?? []).map((def) =>
-        enemyBox(def, this.roomTimeMs / 1000, ENEMY_SPRITES[def.sprite] ?? ENEMY_SPRITES.bowler),
+        enemyBox(def, this.room.seconds, ENEMY_SPRITES[def.sprite] ?? ENEMY_SPRITES.bowler),
       ),
       items: [...this.itemImages.keys()].map((id) => {
         const item = (this.room.data.items ?? []).find((i) => i.id === id) as ItemDef;
@@ -536,7 +609,7 @@ export class GameScene extends Phaser.Scene {
         `VEL  ${this.player.vx.toFixed(0)} ${this.player.vy.toFixed(0)}`,
         `GND  ${this.player.onGround ? 'YES' : 'NO'}  FALL ${this.player.fallDistance.toFixed(0)}`,
         `FPS  ${this.game.loop.actualFps.toFixed(0)}`,
-        `TIME ${(this.roomTimeMs / 1000).toFixed(1)}`,
+        `TIME ${this.room.seconds.toFixed(1)}`,
         `MODE ${this.mode.toUpperCase()}`,
       ],
     });
@@ -556,8 +629,25 @@ export class GameScene extends Phaser.Scene {
     this.playerImage.setVisible(this.mode !== 'finished');
   }
 
+  private renderLifts(): void {
+    const seconds = this.room.seconds;
+    (this.room.data.lifts ?? []).forEach((def, index) => {
+      const deck = this.liftImages[index];
+      if (!deck) return;
+      const box = liftBox(def, seconds);
+      deck.forEach((image, segment) => {
+        image.setPosition(Math.round(box.x) + segment * TILE_SIZE, Math.round(box.y));
+      });
+    });
+  }
+
+  private renderTeleports(): void {
+    const frame = Math.floor(this.room.elapsedMs / 130) % 4;
+    for (const image of this.teleportImages) image.setTexture(keys.teleport(frame));
+  }
+
   private renderEnemies(): void {
-    const seconds = this.roomTimeMs / 1000;
+    const seconds = this.room.seconds;
     const defs = this.room.data.enemies ?? [];
     defs.forEach((def, index) => {
       const image = this.enemyImages[index];
@@ -565,20 +655,20 @@ export class GameScene extends Phaser.Scene {
       const name = def.sprite in ENEMY_SPRITES ? def.sprite : 'bowler';
       const sprite = ENEMY_SPRITES[name];
       const box = enemyBox(def, seconds, sprite);
-      const frame = Math.floor(this.roomTimeMs / sprite.frameMs) % sprite.frames.length;
+      const frame = Math.floor(this.room.elapsedMs / sprite.frameMs) % sprite.frames.length;
       image.setTexture(keys.enemy(name, frame, enemyFacing(def, seconds, sprite)));
       image.setPosition(Math.round(box.x), Math.round(box.y));
     });
   }
 
   private renderItems(): void {
-    const colour = Math.floor(this.roomTimeMs / 110) % ITEM_FLASH_COLOURS.length;
+    const colour = Math.floor(this.room.elapsedMs / 110) % ITEM_FLASH_COLOURS.length;
     for (const [id, image] of this.itemImages) {
       const item = (this.room.data.items ?? []).find((i) => i.id === id);
       if (!item) continue;
       const lock = KEY_ITEMS.get(id);
       if (lock !== undefined) {
-        image.setTexture(keys.keyItem(lock, Math.floor(this.roomTimeMs / 260) % 2));
+        image.setTexture(keys.keyItem(lock, Math.floor(this.room.elapsedMs / 260) % 2));
         continue;
       }
       const name = item.sprite in ITEM_SPRITES ? item.sprite : 'teacup';
@@ -591,14 +681,14 @@ export class GameScene extends Phaser.Scene {
     for (const tile of this.dynamicTiles) {
       switch (tile.char) {
         case '~':
-          tile.image.setTexture(keys.liquid(themeName, Math.floor(this.roomTimeMs / 280) % 2));
+          tile.image.setTexture(keys.liquid(themeName, Math.floor(this.room.elapsedMs / 280) % 2));
           break;
         case '*':
-          tile.image.setTexture(keys.nasty(themeName, Math.floor(this.roomTimeMs / 110) % 2));
+          tile.image.setTexture(keys.nasty(themeName, Math.floor(this.room.elapsedMs / 110) % 2));
           break;
         case '<':
         case '>': {
-          const step = Math.floor(this.roomTimeMs / 70) % 4;
+          const step = Math.floor(this.room.elapsedMs / 70) % 4;
           const frame = tile.char === '>' ? step : 3 - step;
           tile.image.setTexture(keys.conveyor(themeName, frame));
           break;
@@ -613,6 +703,14 @@ export class GameScene extends Phaser.Scene {
           }
           break;
         }
+        case '!':
+          tile.image.setTexture(keys.lever(this.room.switchState));
+          break;
+        case '[':
+        case ']':
+          // The hatch is there only while the switch is in its position.
+          tile.image.setVisible(shutterFor(tile.char) === this.room.switchState);
+          break;
         default: {
           const lock = lockColour(tile.char);
           if (lock === null) break;

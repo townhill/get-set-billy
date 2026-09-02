@@ -99,5 +99,13 @@
       "y": 48,
       "opens": "brass"
     }
+  ],
+  "teleports": [
+    {
+      "id": "roof-cupboard",
+      "x": 160,
+      "y": 40,
+      "to": "cellar-cupboard"
+    }
   ]
 }

@@ -12,6 +12,9 @@ import type { HazardRect } from '../world/tiles';
  *   - A solid tile blocks from all four sides.
  *   - A platform tile blocks downward movement only, and only if the body was
  *     already entirely above it before the step. You jump straight through it.
+ *   - A lift is the same rule without the grid: a rectangle that only its top
+ *     edge blocks, and only from above. Lifts are never solid, so nothing can
+ *     ever be crushed by one.
  *   - Nothing ever bounces, slides, rotates or accumulates momentum.
  *   - Tiles outside the grid are treated as empty; the room boundary is the
  *     caller's business, because that is where the doors are.
@@ -31,6 +34,8 @@ export interface TileGrid {
   solidAt(col: number, row: number): boolean;
   platformAt(col: number, row: number): boolean;
   hazardAt(col: number, row: number): HazardRect | null;
+  /** Moving ledges, where they are at this instant. Empty in most rooms. */
+  readonly liftBoxes: readonly Box[];
 }
 
 export interface SweepXResult {
@@ -43,8 +48,10 @@ export interface SweepYResult {
   y: number;
   onGround: boolean;
   hitCeiling: boolean;
-  /** Row index of the tile landed on, or -1 when airborne. */
+  /** Row index of the tile landed on, or -1 when airborne or riding a lift. */
   groundRow: number;
+  /** Index of the lift landed on, or -1 when not standing on one. */
+  groundLift: number;
 }
 
 export interface MoveResult extends SweepXResult, Omit<SweepYResult, 'y'> {
@@ -110,7 +117,13 @@ export function sweepX(box: Box, dx: number, grid: TileGrid): SweepXResult {
  * than needing a separate check.
  */
 export function sweepY(box: Box, dy: number, grid: TileGrid): SweepYResult {
-  const still: SweepYResult = { y: box.y, onGround: false, hitCeiling: false, groundRow: -1 };
+  const still: SweepYResult = {
+    y: box.y,
+    onGround: false,
+    hitCeiling: false,
+    groundRow: -1,
+    groundLift: -1,
+  };
   if (dy === 0) return still;
 
   const [c0, c1] = colRange(box);
@@ -122,16 +135,34 @@ export function sweepY(box: Box, dy: number, grid: TileGrid): SweepYResult {
     let last = Math.ceil(newBottom / TILE_SIZE) - 1;
     if (newBottom >= first * TILE_SIZE) last = Math.max(last, first);
 
+    // The highest surface anywhere in the swept path wins, whether it is a tile
+    // or a lift, so a lift hanging just above a floor is what you land on.
+    let bestY = Infinity;
+    let bestRow = -1;
+
     for (let row = first; row <= last; row++) {
       for (let col = c0; col <= c1; col++) {
         if (!grid.solidAt(col, row) && !grid.platformAt(col, row)) continue;
-        return {
-          y: row * TILE_SIZE - box.height,
-          onGround: true,
-          hitCeiling: false,
-          groundRow: row,
-        };
+        bestY = row * TILE_SIZE - box.height;
+        bestRow = row;
+        break;
       }
+      if (bestRow >= 0) break;
+    }
+
+    const lift = landingLift(box, dy, grid, bestY);
+    if (lift.index >= 0) {
+      return {
+        y: lift.y,
+        onGround: true,
+        hitCeiling: false,
+        groundRow: -1,
+        groundLift: lift.index,
+      };
+    }
+
+    if (bestRow >= 0) {
+      return { y: bestY, onGround: true, hitCeiling: false, groundRow: bestRow, groundLift: -1 };
     }
   } else {
     const oldTop = box.y;
@@ -148,12 +179,44 @@ export function sweepY(box: Box, dy: number, grid: TileGrid): SweepYResult {
           onGround: false,
           hitCeiling: true,
           groundRow: -1,
+          groundLift: -1,
         };
       }
     }
   }
 
   return { ...still, y: box.y + dy };
+}
+
+/**
+ * Which lift a falling box comes to rest on, if any.
+ *
+ * The same "was I above it before the step" rule the platform tiles use, so a
+ * lift rising past you does not snatch you off a ledge, and jumping up through
+ * one works exactly as it does through a ledge. `ceiling` is the highest tile
+ * surface already found, so a lift below a floor is ignored rather than
+ * teleporting the body through it.
+ */
+function landingLift(
+  box: Box,
+  dy: number,
+  grid: TileGrid,
+  ceiling: number,
+): { index: number; y: number } {
+  let best = { index: -1, y: Infinity };
+  const oldBottom = box.y + box.height;
+  const newBottom = oldBottom + dy;
+
+  grid.liftBoxes.forEach((lift, index) => {
+    if (box.x + box.width <= lift.x || box.x >= lift.x + lift.width) return;
+    // Only a top edge the body was at or above before the step can catch it.
+    if (lift.y < oldBottom || lift.y > newBottom) return;
+    const restingY = lift.y - box.height;
+    if (restingY > ceiling) return;
+    if (restingY < best.y) best = { index, y: restingY };
+  });
+
+  return best;
 }
 
 /** Convenience wrapper: sweep X, then sweep Y from the resolved X. */
@@ -168,6 +231,7 @@ export function moveBox(box: Box, dx: number, dy: number, grid: TileGrid): MoveR
     onGround: vertical.onGround,
     hitCeiling: vertical.hitCeiling,
     groundRow: vertical.groundRow,
+    groundLift: vertical.groundLift,
   };
 }
 

@@ -57,10 +57,19 @@ const MOVES: readonly PlayerInput[] = [
 interface Spot {
   x: number;
   y: number;
+  /**
+   * The room's switch, as it stood when the player was standing here.
+   *
+   * Part of the spot, not a detail of it: reaching a ledge with the shutters
+   * one way is a different situation from reaching it with them the other, and
+   * treating the two as the same lets the solver stitch together a route out of
+   * halves that never existed at the same moment.
+   */
+  on: boolean;
 }
 
-const spotKey = (x: number, y: number): string =>
-  `${Math.round(x / SPOT_GRID) * SPOT_GRID},${Math.round(y)}`;
+const spotKey = (x: number, y: number, on: boolean): string =>
+  `${Math.round(x / SPOT_GRID) * SPOT_GRID},${Math.round(y)},${on ? 1 : 0}`;
 
 export interface Reachability {
   /** Every place the player can stand, as "x,y" keys. */
@@ -69,6 +78,8 @@ export interface Reachability {
   items: Set<string>;
   /** The exits that can actually be used. */
   exits: Set<Direction>;
+  /** Ids of the teleport cupboards that can actually be stepped into. */
+  teleports: Set<string>;
   /** Whether the front door can be touched, if this room has one. */
   door: boolean;
 }
@@ -76,7 +87,16 @@ export interface Reachability {
 interface Attempt {
   landings: Spot[];
   items: string[];
+  teleports: string[];
   exit: Direction | null;
+}
+
+/** Teleports are checked exactly like collectables: can you get to it at all? */
+function teleportBoxes(room: Room): { id: string; box: Box }[] {
+  return (room.data.teleports ?? []).map((pad) => ({
+    id: pad.id,
+    box: { x: pad.x, y: pad.y, width: TILE_SIZE, height: TILE_SIZE },
+  }));
 }
 
 function itemBoxes(room: Room): { id: string; box: Box }[] {
@@ -96,15 +116,19 @@ function attempt(
   input: PlayerInput,
   targets: { id: string; box: Box }[],
   tuning: PlayerTuning,
+  startMs: number,
 ): Attempt {
-  room.reset();
+  room.reset(startMs);
+  room.setSwitch(from.on);
 
   const player = new Player(tuning);
   player.placeAt(from.x, from.y);
 
   const landings: Spot[] = [];
   const touched: string[] = [];
+  const reachedPads: string[] = [];
   const seen = new Set<string>();
+  const pads = teleportBoxes(room);
 
   const note = (): void => {
     const hitbox = insetBox(player.box, PLAYER.hazardInset);
@@ -114,7 +138,13 @@ function attempt(
         touched.push(target.id);
       }
     }
-    if (player.onGround) landings.push({ x: player.x, y: player.y });
+    for (const pad of pads) {
+      if (!seen.has(pad.id) && boxesOverlap(hitbox, pad.box)) {
+        seen.add(pad.id);
+        reachedPads.push(pad.id);
+      }
+    }
+    if (player.onGround) landings.push({ x: player.x, y: player.y, on: room.switchState });
   };
 
   // placeAt treats the jump button as already held, so the first step releases it.
@@ -124,28 +154,33 @@ function attempt(
   for (let i = 0; i < MAX_STEPS; i++) {
     const result = player.step(input, STEP, room);
     note();
-    if (result.leftRoom !== null) return { landings, items: touched, exit: result.leftRoom };
-    if (result.died !== null) return { landings, items: touched, exit: null };
+    if (result.leftRoom !== null) {
+      return { landings, items: touched, teleports: reachedPads, exit: result.leftRoom };
+    }
+    if (result.died !== null) {
+      return { landings, items: touched, teleports: reachedPads, exit: null };
+    }
   }
 
-  return { landings, items: touched, exit: null };
+  return { landings, items: touched, teleports: reachedPads, exit: null };
 }
 
 /** Drops the player from a spawn point and returns where they come to rest. */
-function settle(room: Room, spawn: Spot, tuning: PlayerTuning): Spot[] {
+function settle(room: Room, spawn: Spot, tuning: PlayerTuning, startMs: number): Spot[] {
   const landings: Spot[] = [];
   for (const input of [
     { left: false, right: false, jump: false },
     { left: true, right: false, jump: false },
     { left: false, right: true, jump: false },
   ]) {
-    room.reset();
+    room.reset(startMs);
+    room.setSwitch(spawn.on);
     const player = new Player(tuning);
     player.placeAt(spawn.x, spawn.y);
     for (let i = 0; i < MAX_STEPS; i++) {
       const result = player.step(input, STEP, room);
       if (result.died !== null || result.leftRoom !== null) break;
-      if (player.onGround) landings.push({ x: player.x, y: player.y });
+      if (player.onGround) landings.push({ x: player.x, y: player.y, on: room.switchState });
     }
   }
   return landings;
@@ -158,11 +193,12 @@ function settle(room: Room, spawn: Spot, tuning: PlayerTuning): Spot[] {
  * separately matters: a room can be perfectly navigable when you drop into it
  * through the ceiling and a one-way trap when you walk in from the side.
  */
-export function explore(
+function exploreOnce(
   room: Room,
-  from?: readonly string[],
-  tuning: PlayerTuning = DEFAULT_TUNING,
-  keys: Iterable<LockColour> = ALL_KEYS,
+  from: readonly string[] | undefined,
+  tuning: PlayerTuning,
+  keys: Iterable<LockColour>,
+  startMs: number,
 ): Reachability {
   // Gates are geometry as far as the solver is concerned: an unlocked one is
   // simply air, so which keys the player holds has to be settled up front.
@@ -173,6 +209,7 @@ export function explore(
     spots: new Set(),
     items: new Set(),
     exits: new Set(),
+    teleports: new Set(),
     door: room.data.door === undefined,
   };
 
@@ -181,7 +218,7 @@ export function explore(
 
   const queue: Spot[] = [];
   const push = (spot: Spot): void => {
-    const key = spotKey(spot.x, spot.y);
+    const key = spotKey(spot.x, spot.y, spot.on);
     if (found.spots.has(key) || found.spots.size >= MAX_SPOTS) return;
     found.spots.add(key);
     queue.push(spot);
@@ -191,7 +228,9 @@ export function explore(
     ([key]) => from === undefined || from.includes(key),
   );
   for (const [, spawn] of starts) {
-    for (const landing of settle(room, spawn, tuning)) push(landing);
+    // A room always starts with its switch off; the player arrives before they
+    // have had any chance to touch anything.
+    for (const landing of settle(room, { ...spawn, on: false }, tuning, startMs)) push(landing);
   }
 
   while (queue.length > 0) {
@@ -204,8 +243,9 @@ export function explore(
     }
 
     for (const input of MOVES) {
-      const result = attempt(room, from, input, targets, tuning);
+      const result = attempt(room, from, input, targets, tuning, startMs);
       for (const id of result.items) found.items.add(id);
+      for (const id of result.teleports) found.teleports.add(id);
       if (result.exit !== null) found.exits.add(result.exit);
       for (const landing of result.landings) push(landing);
     }
@@ -223,4 +263,46 @@ export function explore(
   }
 
   return found;
+}
+
+/** How many moments through a lift's cycle a room with lifts is explored from. */
+const LIFT_ARRIVALS = 4;
+
+/**
+ * Explores a room and reports what a player can reach.
+ *
+ * `from` names which spawn points to start at. Checking each entrance
+ * separately matters: a room can be perfectly navigable when you drop into it
+ * through the ceiling and a one-way trap when you walk in from the side.
+ *
+ * A room with lifts in it is explored several times over, from evenly spaced
+ * moments in the lift's cycle, and only what every one of them can reach counts.
+ * Without that the solver would answer for a player who arrives at exactly the
+ * right instant, which is not a route, it is a coincidence — and the whole point
+ * of this file is to refuse to call a coincidence a route.
+ */
+export function explore(
+  room: Room,
+  from?: readonly string[],
+  tuning: PlayerTuning = DEFAULT_TUNING,
+  keys: Iterable<LockColour> = ALL_KEYS,
+): Reachability {
+  const cycle = room.liftCycle;
+  if (cycle === 0) return exploreOnce(room, from, tuning, keys, 0);
+
+  const runs = Array.from({ length: LIFT_ARRIVALS }, (_, i) =>
+    exploreOnce(room, from, tuning, keys, (cycle * 1000 * i) / LIFT_ARRIVALS),
+  );
+
+  const everywhere = <T>(pick: (run: Reachability) => Set<T>): Set<T> =>
+    new Set([...pick(runs[0])].filter((value) => runs.every((run) => pick(run).has(value))));
+
+  return {
+    // Somewhere to stand is a union: any of them proves the arrival is survivable.
+    spots: new Set(runs.flatMap((run) => [...run.spots])),
+    items: everywhere((run) => run.items),
+    exits: everywhere((run) => run.exits),
+    teleports: everywhere((run) => run.teleports),
+    door: runs.every((run) => run.door),
+  };
 }

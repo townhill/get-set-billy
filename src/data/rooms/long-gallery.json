@@ -72,12 +72,27 @@
       "speed": 64
     },
     {
-      "type": "patrol-v",
+      "type": "waypoint",
       "id": "gallery-eye",
       "sprite": "eyeball",
-      "x": 232,
-      "from": 40,
-      "to": 136,
+      "points": [
+        {
+          "x": 232,
+          "y": 40
+        },
+        {
+          "x": 232,
+          "y": 136
+        },
+        {
+          "x": 208,
+          "y": 136
+        },
+        {
+          "x": 208,
+          "y": 40
+        }
+      ],
       "speed": 50
     },
     {

@@ -45,5 +45,18 @@ export default tseslint.config(
       'object-shorthand': 'error',
     },
   },
+  {
+    // Command-line tools, which run in Node and whose whole job is to print.
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+      },
+    },
+    rules: {
+      'no-console': 'off',
+    },
+  },
   prettier,
 );

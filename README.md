@@ -75,19 +75,20 @@ Then open <http://localhost:5173>. Vite hot-reloads as you edit.
 
 ### npm scripts
 
-| Script                 | What it does                                              |
-| ---------------------- | --------------------------------------------------------- |
-| `npm run dev`          | Vite dev server with hot reload on port 5173              |
-| `npm run build`        | Type-check, then bundle to `dist/`                        |
-| `npm run preview`      | Serve the built `dist/` on port 4173                      |
-| `npm run typecheck`    | `tsc --noEmit` in strict mode                             |
-| `npm run lint`         | ESLint, zero warnings tolerated                           |
-| `npm run lint:fix`     | ESLint with `--fix`                                       |
-| `npm run format`       | Prettier, writing changes                                 |
-| `npm run format:check` | Prettier, checking only                                   |
-| `npm test`             | Vitest, one run                                           |
-| `npm run test:watch`   | Vitest in watch mode                                      |
-| `npm run verify`       | Type-check, lint, test and build — everything CI would do |
+| Script                 | What it does                                                 |
+| ---------------------- | ------------------------------------------------------------ |
+| `npm run dev`          | Vite dev server with hot reload on port 5173                 |
+| `npm run build`        | Type-check, then bundle to `dist/`                           |
+| `npm run preview`      | Serve the built `dist/` on port 4173                         |
+| `npm run typecheck`    | `tsc --noEmit` in strict mode                                |
+| `npm run lint`         | ESLint, zero warnings tolerated                              |
+| `npm run lint:fix`     | ESLint with `--fix`                                          |
+| `npm run format`       | Prettier, writing changes                                    |
+| `npm run format:check` | Prettier, checking only                                      |
+| `npm test`             | Vitest, one run                                              |
+| `npm run test:watch`   | Vitest in watch mode                                         |
+| `npm run verify`       | Type-check, lint, test and build — everything CI would do    |
+| `npm run check-room`   | Check one room, or all of them, and draw what can be reached |
 
 ---
 
@@ -144,6 +145,8 @@ src/
   objects/
     Player.ts              Movement model (no Phaser)
     Enemy.ts               Enemy motion as a pure function of time (no Phaser)
+    Lift.ts                Moving ledges, likewise (no Phaser)
+    paths.ts               Walking a closed loop of points (no Phaser)
 
   world/
     tiles.ts               What each tile character means (no Phaser)
@@ -185,13 +188,21 @@ src/
 Phaser draws things and runs the loop. It does not decide anything.
 
 All the rules — movement, collision, enemy paths, room structure, game state,
-saving — live in modules that import no Phaser at all. That is why 368 tests can
+saving — live in modules that import no Phaser at all. That is why 409 tests can
 run in a plain Node environment with no canvas and no WebGL, and it is why
 `GameScene` is mostly sequencing rather than logic.
 
 Arcade Physics is deliberately not used. The movement controller in
 `objects/Player.ts` sets velocities rather than accumulating forces, which is
 what makes the jumps repeatable to the pixel.
+
+### Things that move on a clock
+
+Enemies, lifts and the shimmer on a cupboard all come from the same idea: their
+state is a pure function of **how long you have been in this room**. The room
+owns that clock, resets it on entry and after every death, and hands it out. No
+part of the game keeps a second copy, and nothing about a moving thing has to be
+saved, restored or reconciled.
 
 ### The simulation loop
 
@@ -421,6 +432,9 @@ Exactly **20 rows of exactly 32 characters**. Each cell is 8×8 logical pixels.
 | `v`  | Ceiling spikes — fatal (only the top 5 px)                            |
 | `~`  | Something wet — fatal                                                 |
 | `*`  | Unpleasantness — a small static hazard                                |
+| `!`  | Lever — touch it and the room's hatches swap over                     |
+| `[`  | Hatch — a ledge, there until the lever is pulled                      |
+| `]`  | Hatch — a ledge, not there until the lever is pulled                  |
 | `,`  | Decoration — the theme's first decorative shape, never solid          |
 | `:`  | Decoration — the theme's second decorative shape, never solid         |
 | `B`  | Brass gate — solid until you are carrying the brass key               |
@@ -500,19 +514,23 @@ real movement model. If it says a room is broken, it is broken.
 `ENEMY_SPRITES` (`bowler`, `teapot`, `fork`, `eyeball`, `ghost`, `wasp`, `book`,
 `flask`, `cog`, `moth`, `duck`, `mouse`, `candle`, `spark`, `fern`). All are 8×8.
 
-| `type`     | Fields                                         | Behaviour                                           |
-| ---------- | ---------------------------------------------- | --------------------------------------------------- |
-| `patrol-h` | `y`, `from`, `to`, `speed`, `phase?`           | Back and forth horizontally, `speed` in px/s        |
-| `patrol-v` | `x`, `from`, `to`, `speed`, `phase?`           | Back and forth vertically                           |
-| `circle`   | `cx`, `cy`, `radius`, `speed`, `phase?`        | Round a circle, `speed` in deg/s; negative reverses |
-| `pendulum` | `cx`, `cy`, `length`, `arc`, `speed`, `phase?` | Swings under a pivot, `arc` degrees total           |
-| `static`   | `x`, `y`                                       | Sits there being lethal                             |
+| `type`         | Fields                                           | Behaviour                                           |
+| -------------- | ------------------------------------------------ | --------------------------------------------------- |
+| `patrol-h`     | `y`, `from`, `to`, `speed`, `phase?`             | Back and forth horizontally, `speed` in px/s        |
+| `patrol-v`     | `x`, `from`, `to`, `speed`, `phase?`             | Back and forth vertically                           |
+| `circle`       | `cx`, `cy`, `radius`, `speed`, `phase?`          | Round a circle, `speed` in deg/s; negative reverses |
+| `pendulum`     | `cx`, `cy`, `length`, `arc`, `speed`, `phase?`   | Swings under a pivot, `arc` degrees total           |
+| `waypoint`     | `points`, `speed`, `phase?`                      | Walks a closed loop of points at `speed` px/s       |
+| `figure-eight` | `cx`, `cy`, `width`, `height`, `speed`, `phase?` | A 1:2 Lissajous: once across for twice up and down  |
+| `static`       | `x`, `y`                                         | Sits there being lethal                             |
 
 `phase` is 0–1 and shifts an enemy along its cycle, which is how you get two
 enemies on the same path to stay out of step.
 
-Coordinates are the sprite's top-left, except `circle` and `pendulum`, where
-`cx`/`cy` is the centre of the path. The tests check that enemies stay inside
+Coordinates are the sprite's top-left, except `circle`, `pendulum` and
+`figure-eight`, where `cx`/`cy` is the centre of the path. A `waypoint` path
+uses top-left coordinates, because a two-point waypoint path is exactly a
+patrol and it would be strange for the two to disagree. The tests check that enemies stay inside
 the room.
 
 ### 6. Collectables
@@ -541,7 +559,62 @@ Keys do not flash through the palette like the other collectables. They are
 drawn in their own lock's colour, pulsing gently between its two inks, because
 which gate a key fits has to be obvious from across the room.
 
-### 6a. Keys and gates
+### 5a. Lifts
+
+A lift is a ledge that moves. Where it is depends only on how long you have
+been in the room, exactly like an enemy, so it snaps back to the start every
+time you enter or die and stays as learnable as everything else.
+
+```json
+"lifts": [
+  { "id": "boiler-hoist", "points": [{ "x": 16, "y": 128 }, { "x": 16, "y": 64 }],
+    "speed": 24, "width": 16 }
+]
+```
+
+There is one movement type rather than several, because a closed loop of points
+already covers all of them: two points is a straight run, up and down or side to
+side, and more than two is a circuit. `points` are the platform's top-left.
+
+**A lift is a one-way platform, never a solid.** You jump up through it and land
+on top, and it can never crush you against a ceiling — the failure mode that
+makes moving solids miserable to get right is simply absent. Stand on one and it
+carries you, sweeping you against walls rather than posting you through them.
+
+Lifts ignore the tile grid, so nothing stops a badly placed one gliding through
+a wall. `tests/rooms.test.ts` samples the whole circuit and fails if it does.
+
+### 5b. Levers and hatches
+
+A hatch is a ledge that is only there while the room's switch is one way round,
+and touching a lever swaps it over. `[` hatches start there, `]` hatches start
+absent, so one lever can take a floor away and put another one down.
+
+The switch is **room-local and reset on entry**. It can never become hidden
+state that follows the player round the house, and no arrangement of it survives
+a death, so it can never leave the game in a position a fresh visit cannot undo.
+
+Hatches are ledges rather than walls, deliberately: a one-way platform cannot
+wall a player in, and cannot block a climb that was working before.
+
+The reachability solver knows about them. Which way the switch is round is part
+of a _spot_, not a detail of it — reaching a ledge with the hatches one way is a
+different situation from reaching it with them the other, and treating the two as
+the same would let the solver stitch a route together out of halves that never
+existed at the same moment.
+
+### 6a. Teleport cupboards
+
+```json
+"teleports": [{ "id": "roof-cupboard", "x": 160, "y": 48, "to": "cellar-cupboard" }]
+```
+
+Cupboards come in pairs, each naming the other, and the tests check both that
+the pairing is mutual and that **each end is somewhere the player could already
+stand** — so coming out of one is never more dangerous than walking in through
+the door. Stepping out of a cupboard does not immediately step you back into it.
+
+### 6b. Keys and gates
 
 A gate is a tile that is solid until you are carrying its key, and plain air the
 moment you are. There are four colours — `brass`, `silver`, `iron`, `copper` —
@@ -577,7 +650,7 @@ Where a gate may go:
 `tests/rooms.test.ts` checks all of these. `tests/progression.test.ts` checks the
 much more important thing: that the house can still be finished.
 
-### 6b. Not painting yourself into a corner
+### 6c. Not painting yourself into a corner
 
 Locks introduce a way to break the game that no per-room check can see. Every
 room can be well formed, every exit reciprocal, every ledge reachable — and the
@@ -625,7 +698,7 @@ room. A broken room fails the build.
 npm test
 ```
 
-368 tests, in a plain Node environment — no browser, no canvas, no Phaser.
+409 tests, in a plain Node environment — no browser, no canvas, no Phaser.
 
 | File                         | Covers                                                                                                                                                                  |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

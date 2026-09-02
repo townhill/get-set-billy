@@ -5,9 +5,12 @@ import {
   moveBox,
   overlapsHazard,
   supportColumns,
+  sweepX,
+  sweepY,
 } from '../systems/CollisionSystem';
 import type { Room } from '../world/Room';
-import type { Direction } from '../world/roomTypes';
+import type { Direction, TeleportDef } from '../world/roomTypes';
+import { isLever } from '../world/tiles';
 
 /**
  * The player's movement model.
@@ -58,6 +61,10 @@ export interface StepResult {
   jumped: boolean;
   /** How many crumbling floors finished collapsing this step. */
   floorsCollapsed: number;
+  /** True on the step the player threw the room's switch. */
+  flippedSwitch: boolean;
+  /** The id of a teleport stepped into this step, or null. */
+  teleported: string | null;
 }
 
 export type PlayerPose = 'stand' | 'walk' | 'jump' | 'fall';
@@ -71,11 +78,18 @@ export class Player {
   onGround = false;
   /** How far the player has dropped since last being supported, in pixels. */
   fallDistance = 0;
+  /** Index of the lift being stood on, or -1. Kept so the next step can carry them. */
+  ridingLift = -1;
 
   private coyoteMs = 0;
   private jumpBufferMs = 0;
   private jumpWasHeld = false;
   private animMs = 0;
+  /**
+   * Set on arrival, so stepping out of a teleport does not immediately step
+   * back into it. Cleared the moment the player is standing clear of them all.
+   */
+  private teleportHeld = true;
 
   constructor(private readonly tuning: PlayerTuning = DEFAULT_TUNING) {}
 
@@ -101,22 +115,31 @@ export class Player {
     this.vy = vy;
     this.onGround = false;
     this.fallDistance = fallDistance;
+    this.ridingLift = -1;
     this.coyoteMs = 0;
     this.jumpBufferMs = 0;
     this.jumpWasHeld = true; // a held jump button must be released before it fires again
+    this.teleportHeld = true; // and an arrival must step off the pad before using it
     this.animMs = 0;
   }
 
   /** Advances the player by exactly one fixed simulation step. */
   step(input: PlayerInput, dtSeconds: number, room: Room): StepResult {
     const dtMs = dtSeconds * 1000;
+
+    // The room moves first: floors give way, and the lifts travel. Anything
+    // standing on a lift goes with it before it gets a say in the matter.
+    const moved = room.advance(dtMs);
     const result: StepResult = {
       leftRoom: null,
       died: null,
       landed: false,
       jumped: false,
-      floorsCollapsed: room.updateCrumbling(dtMs).length,
+      floorsCollapsed: moved.collapsed.length,
+      flippedSwitch: false,
+      teleported: null,
     };
+    this.rideLift(moved.liftDeltas, room);
 
     // --- intent ---------------------------------------------------------
     if (input.jump && !this.jumpWasHeld) this.jumpBufferMs = PLAYER.jumpBufferMs;
@@ -158,34 +181,53 @@ export class Player {
     // --- movement -------------------------------------------------------
     const previousY = this.y;
     const wasOnGround = this.onGround;
-    const moved = moveBox(this.box, (this.vx + drift) * dtSeconds, this.vy * dtSeconds, room);
+    const step = moveBox(this.box, (this.vx + drift) * dtSeconds, this.vy * dtSeconds, room);
 
-    this.x = moved.x;
-    this.y = moved.y;
+    this.x = step.x;
+    this.y = step.y;
 
-    if (moved.hitCeiling) this.vy = 0;
+    if (step.hitCeiling) this.vy = 0;
 
     const droppedBy = this.y - previousY;
-    if (!moved.onGround && droppedBy > 0) this.fallDistance += droppedBy;
+    if (!step.onGround && droppedBy > 0) this.fallDistance += droppedBy;
 
-    if (moved.onGround) {
+    if (step.onGround) {
       this.vy = 0;
       this.coyoteMs = PLAYER.coyoteTimeMs;
       if (!wasOnGround) result.landed = true;
       // Anything crumbling underfoot starts to go.
-      for (const col of supportColumns(this.box, moved.groundRow)) {
-        room.standOn(col, moved.groundRow);
+      for (const col of supportColumns(this.box, step.groundRow)) {
+        room.standOn(col, step.groundRow);
       }
     } else {
       this.coyoteMs = Math.max(0, this.coyoteMs - dtMs);
     }
-    this.onGround = moved.onGround;
+    this.onGround = step.onGround;
+    this.ridingLift = step.groundLift;
 
     // --- animation ------------------------------------------------------
     if (this.onGround && this.vx !== 0) {
       this.animMs += dtMs;
     } else if (this.vx === 0) {
       this.animMs = 0;
+    }
+
+    // --- levers -----------------------------------------------------------
+    if (room.hasSwitch) {
+      result.flippedSwitch = room.touchLever(this.touchingLever(room));
+    }
+
+    // --- teleports ---------------------------------------------------------
+    const pads = room.data.teleports;
+    if (pads !== undefined && pads.length > 0) {
+      const standing = this.teleportUnderfoot(pads);
+      if (standing === null) {
+        this.teleportHeld = false;
+      } else if (!this.teleportHeld) {
+        this.teleportHeld = true;
+        result.teleported = standing;
+        return result;
+      }
     }
 
     // --- leaving the room ------------------------------------------------
@@ -206,6 +248,64 @@ export class Player {
     if (result.landed) this.fallDistance = 0;
 
     return result;
+  }
+
+  /**
+   * Moves with the lift underfoot, if there is one.
+   *
+   * Swept rather than teleported, so a lift carrying you sideways into a wall
+   * leaves you against the wall and slides out from under you, rather than
+   * posting you through it. A lift going down does not drag you: gravity
+   * catches you up on the same step, and being pulled downward faster than you
+   * fall would feel like being grabbed.
+   */
+  private rideLift(deltas: readonly { x: number; y: number }[], room: Room): void {
+    if (!this.onGround || this.ridingLift < 0) return;
+    const delta = deltas[this.ridingLift];
+    if (delta === undefined || (delta.x === 0 && delta.y === 0)) return;
+
+    const across = sweepX(this.box, delta.x, room);
+    this.x = across.x;
+
+    if (delta.y < 0) {
+      const up = sweepY(this.box, delta.y, room);
+      this.y = up.y;
+    } else {
+      this.y += delta.y;
+    }
+  }
+
+  /** The teleport the player is standing in, if any. */
+  private teleportUnderfoot(pads: readonly TeleportDef[]): string | null {
+    const box = insetBox(this.box, PLAYER.hazardInset);
+    for (const pad of pads) {
+      const cell = { x: pad.x, y: pad.y, width: TILE_SIZE, height: TILE_SIZE };
+      if (
+        box.x < cell.x + cell.width &&
+        box.x + box.width > cell.x &&
+        box.y < cell.y + cell.height &&
+        box.y + box.height > cell.y
+      ) {
+        return pad.id;
+      }
+    }
+    return null;
+  }
+
+  /** True when any part of the player overlaps a lever cell. */
+  private touchingLever(room: Room): boolean {
+    if (!room.hasSwitch) return false;
+    const box = insetBox(this.box, PLAYER.hazardInset);
+    const c0 = Math.floor(box.x / TILE_SIZE);
+    const c1 = Math.floor((box.x + box.width - 1) / TILE_SIZE);
+    const r0 = Math.floor(box.y / TILE_SIZE);
+    const r1 = Math.floor((box.y + box.height - 1) / TILE_SIZE);
+    for (let col = c0; col <= c1; col++) {
+      for (let row = r0; row <= r1; row++) {
+        if (isLever(room.charAt(col, row))) return true;
+      }
+    }
+    return false;
   }
 
   /**

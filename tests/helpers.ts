@@ -17,6 +17,7 @@ export function grid(rows: string[]): TileGrid {
     solidAt: (col, row) => tileDef(at(col, row)).solid,
     platformAt: (col, row) => tileDef(at(col, row)).platform,
     hazardAt: (col, row) => tileDef(at(col, row)).hazard,
+    liftBoxes: [],
   };
 }
 

@@ -44,6 +44,14 @@ describe.each(ALL_ROOM_DATA.map((room) => [room.id, room] as const))('%s', (id, 
       expect(found.items.has(item.id), `${via} cannot collect "${item.id}"`).toBe(true);
     }
 
+    // Both ends of every cupboard have to be somewhere you could already get
+    // to, or coming out of one would be more dangerous than walking in.
+    for (const pad of data.teleports ?? []) {
+      expect(found.teleports.has(pad.id), `${via} cannot reach the cupboard "${pad.id}"`).toBe(
+        true,
+      );
+    }
+
     expect(found.door, `${via} cannot reach the front door`).toBe(true);
   }
 

@@ -345,3 +345,49 @@ export const GATE_ART: readonly Art[] = [
   ['11111111', '1..1..1.', '2..2..2.', '........', '11111111', '1..1..1.', '2..2..2.', '........'],
   ['11111111', '2..2..2.', '........', '........', '11111111', '2..2..2.', '........', '........'],
 ];
+
+/**
+ * One eight-pixel segment of a lift's deck.
+ *
+ * Lifts are as wide as their definition says, so a lift is drawn as a row of
+ * these. Hangers underneath rather than a solid block, because only the top
+ * edge is real: you jump up through the rest of it.
+ */
+export const LIFT_ART: Art = [
+  '11111111',
+  '21111112',
+  '.222222.',
+  '..2..2..',
+  '........',
+  '........',
+  '........',
+  '........',
+];
+
+/** A lever, in its two positions. Touch it and the room's hatches swap over. */
+export const LEVER_ART: readonly Art[] = [
+  ['........', '.1......', '.1......', '11......', '22......', '2222222.', '2222222.', '........'],
+  ['........', '......1.', '......1.', '......11', '......22', '.2222222', '.2222222', '........'],
+];
+
+/** A hatch: slatted, so it never reads as a wall or as an ordinary ledge. */
+export const HATCH_ART: Art = [
+  '11111111',
+  '12222221',
+  '11111111',
+  '12222221',
+  '........',
+  '........',
+  '........',
+  '........',
+];
+
+/** A teleport cupboard, shimmering. Four frames, cycled. */
+export const TELEPORT_ART: readonly Art[] = [0, 1, 2, 3].map((phase) =>
+  Array.from({ length: 8 }, (_unused, row) =>
+    Array.from({ length: 8 }, (_also, col) => {
+      if (row === 0 || row === 7 || col === 0 || col === 7) return '1';
+      return (row + col + phase) % 4 === 0 ? '2' : '.';
+    }).join(''),
+  ),
+);

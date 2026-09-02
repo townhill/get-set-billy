@@ -89,6 +89,14 @@ export const WORLD = {
   gateOpenMs: 520,
   /** Shortest gap between two "that gate is locked" complaints, in milliseconds. */
   gateNagCooldownMs: 1400,
+  /**
+   * How tall a lift's collision box is, in pixels.
+   *
+   * Only its top edge ever blocks anything — a lift is a one-way platform, so
+   * you jump up through it — but it is drawn one cell deep so it reads as a
+   * ledge rather than a hairline.
+   */
+  liftHeight: 8,
 } as const;
 
 export const AUDIO = {

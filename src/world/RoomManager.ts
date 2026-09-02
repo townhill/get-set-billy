@@ -59,6 +59,18 @@ export function keysHeld(collected: Iterable<string>): Set<LockColour> {
   return held;
 }
 
+/** Every teleport in the house, by id, with the room it stands in. */
+export const ALL_TELEPORTS: ReadonlyMap<
+  string,
+  { room: string; x: number; y: number; to: string }
+> = new Map(
+  ALL_ROOM_DATA.flatMap((room) =>
+    (room.teleports ?? []).map(
+      (pad) => [pad.id, { room: room.id, x: pad.x, y: pad.y, to: pad.to }] as const,
+    ),
+  ),
+);
+
 export class RoomManager {
   private readonly rooms = new Map<string, Room>();
 
@@ -112,6 +124,22 @@ export class RoomManager {
       for (const item of room.data.items ?? []) {
         if (item.opens === undefined) continue;
         keysGiven.set(item.opens, [...(keysGiven.get(item.opens) ?? []), item.id]);
+      }
+    }
+
+    const padIds = new Set<string>();
+    for (const room of this.rooms.values()) {
+      for (const pad of room.data.teleports ?? []) {
+        if (padIds.has(pad.id)) problems.push(`duplicate teleport id "${pad.id}"`);
+        padIds.add(pad.id);
+      }
+    }
+    for (const [id, pad] of ALL_TELEPORTS) {
+      const other = ALL_TELEPORTS.get(pad.to);
+      if (other === undefined) {
+        problems.push(`teleport "${id}" leads to "${pad.to}", which does not exist`);
+      } else if (other.to !== id) {
+        problems.push(`teleport "${id}" leads to "${pad.to}", which does not lead back`);
       }
     }
 

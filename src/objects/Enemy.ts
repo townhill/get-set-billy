@@ -1,5 +1,6 @@
 import type { Box } from '../systems/CollisionSystem';
 import type { EnemyDef, Point } from '../world/roomTypes';
+import { alongPath, pathPeriod } from './paths';
 
 /**
  * Enemy movement, as a pure function of "how long have you been in this room".
@@ -26,6 +27,32 @@ function triangle(from: number, to: number, speed: number, seconds: number, phas
   const travelled = t * Math.abs(speed);
   const offset = travelled <= span ? travelled : 2 * span - travelled;
   return from < to ? from + offset : from - offset;
+}
+
+/**
+ * How long an enemy takes to get back to exactly where it started, in seconds.
+ *
+ * Zero for anything that never moves. Used to shift an enemy along its cycle by
+ * its `phase`, and by the tests, which sample a whole cycle rather than
+ * restating each path's extremes in a second place.
+ */
+export function enemyPeriod(def: EnemyDef): number {
+  switch (def.type) {
+    case 'patrol-h':
+    case 'patrol-v': {
+      const span = Math.abs(def.to - def.from);
+      return span === 0 || def.speed === 0 ? 0 : (2 * span) / Math.abs(def.speed);
+    }
+    case 'circle':
+    case 'figure-eight':
+      return def.speed === 0 ? 0 : 360 / Math.abs(def.speed);
+    case 'pendulum':
+      return (2 * def.arc) / Math.max(1, Math.abs(def.speed));
+    case 'waypoint':
+      return pathPeriod(def.points, def.speed);
+    case 'static':
+      return 0;
+  }
 }
 
 /** Top-left corner of an enemy at a given moment. */
@@ -57,6 +84,20 @@ export function enemyPosition(def: EnemyDef, seconds: number, size: SpriteSize):
       };
     }
 
+    case 'waypoint':
+      // A two-point path is exactly a patrol, which is why these coordinates
+      // are the sprite's top-left like a patrol's, not a centre like a circle's.
+      return alongPath(def.points, def.speed * (seconds + phase * enemyPeriod(def)));
+
+    case 'figure-eight': {
+      // A 1:2 Lissajous: once across horizontally for twice vertically.
+      const angle = (phase * 360 + def.speed * seconds) * DEG;
+      return {
+        x: def.cx + Math.sin(angle) * def.width - size.width / 2,
+        y: def.cy + Math.sin(2 * angle) * def.height - size.height / 2,
+      };
+    }
+
     case 'static':
       return { x: def.x, y: def.y };
   }
@@ -68,9 +109,18 @@ export function enemyBox(def: EnemyDef, seconds: number, size: SpriteSize): Box 
   return { x, y, width: size.width, height: size.height };
 }
 
-/** Which way a patrolling enemy is currently facing: -1 left, +1 right. */
+/**
+ * Which way an enemy is currently facing: -1 left, +1 right.
+ *
+ * Only for the ones that travel along a line and would look wrong going
+ * backwards. A circling moth and a swinging cog are symmetrical about their own
+ * path and are left facing right, which is also what a static hazard does,
+ * having nowhere else to look.
+ */
+const TURNS_ROUND: readonly EnemyDef['type'][] = ['patrol-h', 'waypoint', 'figure-eight'];
+
 export function enemyFacing(def: EnemyDef, seconds: number, size: SpriteSize): -1 | 1 {
-  if (def.type !== 'patrol-h') return 1;
+  if (!TURNS_ROUND.includes(def.type)) return 1;
   const now = enemyPosition(def, seconds, size).x;
   const soon = enemyPosition(def, seconds + 1 / 30, size).x;
   return soon < now ? -1 : 1;
