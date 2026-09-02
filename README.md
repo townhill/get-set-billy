@@ -201,7 +201,7 @@ src/
 Phaser draws things and runs the loop. It does not decide anything.
 
 All the rules — movement, collision, enemy paths, room structure, game state,
-saving — live in modules that import no Phaser at all. That is why 463 tests can
+saving — live in modules that import no Phaser at all. That is why 464 tests can
 run in a plain Node environment with no canvas and no WebGL, and it is why
 `GameScene` is mostly sequencing rather than logic.
 
@@ -624,8 +624,16 @@ on top, and it can never crush you against a ceiling — the failure mode that
 makes moving solids miserable to get right is simply absent. Stand on one and it
 carries you, sweeping you against walls rather than posting you through them.
 
+A lift that runs straight up and down is drawn hanging from a chain that reaches
+the ceiling, so it reads as a hoist rather than as a slab of machinery floating
+in mid-air. Its links are spaced from the deck rather than from the ceiling, so
+they travel with the lift and it looks winched — which is also the only
+animation such a lift can have, since the deck itself must not appear to move
+relative to the feet standing on it.
+
 Lifts ignore the tile grid, so nothing stops a badly placed one gliding through
-a wall. `tests/rooms.test.ts` samples the whole circuit and fails if it does.
+a wall, or its chain being drawn through a ledge. `tests/rooms.test.ts` samples
+the whole circuit and the whole shaft above it, and fails if either happens.
 
 ### 5b. Levers and hatches
 
@@ -763,7 +771,7 @@ room. A broken room fails the build.
 npm test
 ```
 
-463 tests, in a plain Node environment — no browser, no canvas, no Phaser.
+464 tests, in a plain Node environment — no browser, no canvas, no Phaser.
 
 | File                         | Covers                                                                                                                                                                  |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

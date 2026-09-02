@@ -74,7 +74,7 @@ export const keys = {
   conveyor: (theme: string, frame: number): string => `tile-${theme}-conveyor-${frame}`,
   crumble: (theme: string, stage: number): string => `tile-${theme}-crumble-${stage}`,
   gate: (lock: LockColour, stage: number): string => `gate-${lock}-${stage}`,
-  lift: (theme: string): string => `tile-${theme}-lift`,
+  lift: (theme: string, frame: number): string => `tile-${theme}-lift-${frame}`,
   lever: (on: boolean): string => `tile-lever-${on ? 'on' : 'off'}`,
   teleport: (frame: number): string => `tile-teleport-${frame}`,
   hatch: (theme: string): string => `tile-${theme}-hatch`,
@@ -177,12 +177,14 @@ function buildThemeTiles(scene: Phaser.Scene, name: string, theme: ThemeDef): vo
   });
   // Lifts and hatches borrow the theme's machinery colours, the same ones the
   // conveyors use, so they read as apparatus rather than as scenery.
-  ensureArt(
-    scene,
-    keys.lift(name),
-    LIFT_ART,
-    paletteInk(['1', theme.conveyorInk], ['2', theme.conveyorShade]),
-  );
+  LIFT_ART.forEach((art, index) => {
+    ensureArt(
+      scene,
+      keys.lift(name, index),
+      art,
+      paletteInk(['1', theme.conveyorInk], ['2', theme.conveyorShade]),
+    );
+  });
   ensureArt(
     scene,
     keys.hatch(name),

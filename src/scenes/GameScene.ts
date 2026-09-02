@@ -34,7 +34,7 @@ import {
 } from '../world/RoomManager';
 import type { Room } from '../world/Room';
 import { OPPOSITE, type Direction, type ItemDef } from '../world/roomTypes';
-import { GATE_ART } from '../assets/tileArt';
+import { GATE_ART, LIFT_ART } from '../assets/tileArt';
 import { type LockColour, lockColour, shutterFor } from '../world/tiles';
 import { Hud } from '../ui/Hud';
 import { MapOverlay } from '../ui/MapOverlay';
@@ -99,6 +99,8 @@ export class GameScene extends Phaser.Scene {
   private teleportImages: Phaser.GameObjects.Image[] = [];
   /** Ropes are lines rather than tiles, so they are the one thing drawn as vectors. */
   private ropeGraphics: Phaser.GameObjects.Graphics | null = null;
+  /** Lift chains, likewise, and behind the decks they hold up. */
+  private liftGraphics: Phaser.GameObjects.Graphics | null = null;
   private itemImages = new Map<string, Phaser.GameObjects.Image>();
   private map: MapOverlay | null = null;
   private roomTitle: PixelText | null = null;
@@ -125,6 +127,7 @@ export class GameScene extends Phaser.Scene {
     this.hud = new Hud(this);
     this.map = new MapOverlay(this, DEPTH.overlay);
     this.ropeGraphics = this.add.graphics().setDepth(DEPTH.tiles);
+    this.liftGraphics = this.add.graphics().setDepth(DEPTH.tiles - 1);
     this.reducedFlashing = SaveSystem.loadSettings().reducedFlashing;
 
     this.roomTitle = new PixelText(this, {
@@ -261,7 +264,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private buildLifts(): void {
-    const texture = keys.lift(this.room.data.theme);
+    const texture = keys.lift(this.room.data.theme, 0);
     for (const def of this.room.data.lifts ?? []) {
       const segments = Math.max(1, Math.ceil(def.width / TILE_SIZE));
       const deck: Phaser.GameObjects.Image[] = [];
@@ -685,14 +688,45 @@ export class GameScene extends Phaser.Scene {
     this.playerImage.setVisible(this.mode !== 'finished');
   }
 
+  /**
+   * Lifts, and the chains they hang from.
+   *
+   * The chain is not decoration. Without it a lift is a slab of machinery
+   * floating in mid-air with nothing holding it up, which reads as a bug rather
+   * than as a hoist. Its links are spaced from the deck rather than from the
+   * ceiling, so they travel with the lift and it looks winched rather than
+   * slid — which is also the only animation a lift going straight up can have,
+   * since the deck itself must not move relative to the feet standing on it.
+   *
+   * Only for a lift that runs vertically. A trolley crossing a room sideways
+   * would be hanging from nothing.
+   */
   private renderLifts(): void {
     const seconds = this.room.seconds;
+    const theme = this.room.data.theme;
+    const chains = this.liftGraphics;
+    chains?.clear();
+
     (this.room.data.lifts ?? []).forEach((def, index) => {
       const deck = this.liftImages[index];
       if (!deck) return;
+
       const box = liftBox(def, seconds);
+      const left = Math.round(box.x);
+      const top = Math.round(box.y);
+
+      if (chains !== null && def.points.every((point) => point.x === def.points[0].x)) {
+        chains.fillStyle(paletteHex(themeFor(theme).conveyorShade), 1);
+        const middle = left + Math.floor(def.width / 2);
+        for (let y = top - 3; y >= 0; y -= 3) {
+          chains.fillRect(middle, y, 1, 2);
+        }
+      }
+
+      const frame = Math.floor(this.room.elapsedMs / 120) % LIFT_ART.length;
       deck.forEach((image, segment) => {
-        image.setPosition(Math.round(box.x) + segment * TILE_SIZE, Math.round(box.y));
+        image.setTexture(keys.lift(theme, frame));
+        image.setPosition(left + segment * TILE_SIZE, top);
       });
     });
   }
@@ -839,6 +873,8 @@ export class GameScene extends Phaser.Scene {
   private teardown(): void {
     this.ropeGraphics?.destroy();
     this.ropeGraphics = null;
+    this.liftGraphics?.destroy();
+    this.liftGraphics = null;
     this.roomTitle?.destroy();
     this.roomTitle = null;
     this.hidePauseOverlay();

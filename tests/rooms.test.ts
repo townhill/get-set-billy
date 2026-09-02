@@ -492,6 +492,28 @@ describe('lifts', () => {
   );
 
   it.each(withLifts.map((data) => [data.id, data] as const))(
+    '%s leaves the shaft above a hoist clear for its chain',
+    (_id, data) => {
+      const room = rooms.get(_id);
+      for (const def of data.lifts ?? []) {
+        // A lift that runs straight up and down is drawn hanging from a chain
+        // that reaches the ceiling, so the column it winds up through has to be
+        // as empty as the lift's own path.
+        if (!def.points.every((point) => point.x === def.points[0].x)) continue;
+
+        const col = Math.floor((def.points[0].x + def.width / 2) / TILE_SIZE);
+        const highest = Math.min(...def.points.map((point) => point.y));
+        for (let row = 1; row * TILE_SIZE < highest; row++) {
+          expect(
+            room.solidAt(col, row),
+            `the chain for ${def.id} is drawn through a wall at row ${row}`,
+          ).toBe(false);
+        }
+      }
+    },
+  );
+
+  it.each(withLifts.map((data) => [data.id, data] as const))(
     '%s gives every lift somewhere to go',
     (_id, data) => {
       for (const def of data.lifts ?? []) {

@@ -7,7 +7,18 @@ import {
   DOOR_HEIGHT,
   DOOR_WIDTH,
 } from '../src/assets/sprites';
-import { WALL_ART, LEDGE_ART, DECOR_ART, CONVEYOR_ART, CRUMBLE_ART } from '../src/assets/tileArt';
+import {
+  CONVEYOR_ART,
+  CRUMBLE_ART,
+  DECOR_ART,
+  GATE_ART,
+  HATCH_ART,
+  LEDGE_ART,
+  LEVER_ART,
+  LIFT_ART,
+  TELEPORT_ART,
+  WALL_ART,
+} from '../src/assets/tileArt';
 import { TILE_SIZE } from '../src/config';
 
 /**
@@ -65,6 +76,11 @@ describe('the artwork', () => {
     for (const [name, art] of Object.entries(DECOR_ART)) checkArt(name, art, TILE_SIZE, TILE_SIZE);
     CONVEYOR_ART.forEach((art, i) => checkArt(`conveyor ${i}`, art, TILE_SIZE, TILE_SIZE));
     CRUMBLE_ART.forEach((art, i) => checkArt(`crumble ${i}`, art, TILE_SIZE, TILE_SIZE));
+    GATE_ART.forEach((art, i) => checkArt(`gate ${i}`, art, TILE_SIZE, TILE_SIZE));
+    LIFT_ART.forEach((art, i) => checkArt(`lift ${i}`, art, TILE_SIZE, TILE_SIZE));
+    LEVER_ART.forEach((art, i) => checkArt(`lever ${i}`, art, TILE_SIZE, TILE_SIZE));
+    TELEPORT_ART.forEach((art, i) => checkArt(`teleport ${i}`, art, TILE_SIZE, TILE_SIZE));
+    checkArt('hatch', HATCH_ART, TILE_SIZE, TILE_SIZE);
   });
 
   it('draws every collectable at exactly one cell', () => {

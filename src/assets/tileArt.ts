@@ -346,22 +346,34 @@ export const GATE_ART: readonly Art[] = [
   ['11111111', '2..2..2.', '........', '........', '11111111', '2..2..2.', '........', '........'],
 ];
 
+const liftFrame = (rivets: string, hangers: string): Art => [
+  '11111111',
+  rivets,
+  '.222222.',
+  hangers,
+  '........',
+  '........',
+  '........',
+  '........',
+];
+
 /**
- * One eight-pixel segment of a lift's deck.
+ * One eight-pixel segment of a lift's deck, working.
  *
  * Lifts are as wide as their definition says, so a lift is drawn as a row of
  * these. Hangers underneath rather than a solid block, because only the top
- * edge is real: you jump up through the rest of it.
+ * edge is real: you jump up through the rest of it — and the deck itself never
+ * changes between frames, because it is the thing being stood on and a surface
+ * that flickers is a surface nobody trusts.
+ *
+ * What moves is the rivets and the hangers, which is enough to say "this is
+ * machinery and it is running" without the platform appearing to wobble.
  */
-export const LIFT_ART: Art = [
-  '11111111',
-  '21111112',
-  '.222222.',
-  '..2..2..',
-  '........',
-  '........',
-  '........',
-  '........',
+export const LIFT_ART: readonly Art[] = [
+  liftFrame('21111112', '..2..2..'),
+  liftFrame('12111121', '.2....2.'),
+  liftFrame('11211211', '..2..2..'),
+  liftFrame('11122111', '...22...'),
 ];
 
 /** A lever, in its two positions. Touch it and the room's hatches swap over. */
