@@ -1,5 +1,6 @@
 import { ROOM_COLS, ROOM_ROWS } from '../config';
 import { LOCK_COLOURS, type LockColour, isKnownTile } from './tiles';
+import { MIN_GRIP } from '../objects/Rope';
 
 /** The four ways out of a room. */
 export type Direction = 'left' | 'right' | 'up' | 'down';
@@ -136,6 +137,28 @@ export interface LiftDef {
 }
 
 /**
+ * A rope hanging from a pivot, swinging.
+ *
+ * The same shape as a pendulum enemy, because it is one — the difference is
+ * that this one you hold on to rather than die of.
+ */
+export interface RopeDef {
+  /** Unique within the room. */
+  id: string;
+  /** The pivot it hangs from. */
+  cx: number;
+  cy: number;
+  /** How far it reaches, in pixels. */
+  length: number;
+  /** Total sweep in degrees, centred on straight down. */
+  arc: number;
+  /** Degrees per second along the arc. */
+  speed: number;
+  /** 0..1, shifts the rope along its swing at room entry. */
+  phase?: number;
+}
+
+/**
  * A cupboard you step into and come out of somewhere else.
  *
  * Teleports come in pairs, each naming the other, and both ends must be
@@ -190,6 +213,7 @@ export interface RoomData {
   enemies?: EnemyDef[];
   items?: ItemDef[];
   lifts?: LiftDef[];
+  ropes?: RopeDef[];
   teleports?: TeleportDef[];
   /** The front door. Present in exactly one room: it is how the game is won. */
   door?: Point;
@@ -242,6 +266,14 @@ export function validateRoomShape(data: RoomData): string[] {
     liftIds.add(lift.id);
     if (lift.points.length < 2) issues.push(`lift "${lift.id}" needs at least two points`);
     if (lift.width <= 0) issues.push(`lift "${lift.id}" has no width`);
+  }
+
+  const ropeIds = new Set<string>();
+  for (const rope of data.ropes ?? []) {
+    if (ropeIds.has(rope.id)) issues.push(`duplicate rope id "${rope.id}"`);
+    ropeIds.add(rope.id);
+    if (rope.length <= MIN_GRIP) issues.push(`rope "${rope.id}" is too short to take hold of`);
+    if (rope.arc <= 0) issues.push(`rope "${rope.id}" does not swing`);
   }
 
   for (const pad of data.teleports ?? []) {

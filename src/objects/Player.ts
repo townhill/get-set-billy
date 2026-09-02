@@ -11,6 +11,7 @@ import {
 import type { Room } from '../world/Room';
 import type { Direction, TeleportDef } from '../world/roomTypes';
 import { isLever } from '../world/tiles';
+import { gripDistance, ropePoint } from './Rope';
 
 /**
  * The player's movement model.
@@ -63,11 +64,13 @@ export interface StepResult {
   floorsCollapsed: number;
   /** True on the step the player threw the room's switch. */
   flippedSwitch: boolean;
+  /** True on the step the player caught hold of a rope. */
+  grabbedRope: boolean;
   /** The id of a teleport stepped into this step, or null. */
   teleported: string | null;
 }
 
-export type PlayerPose = 'stand' | 'walk' | 'jump' | 'fall';
+export type PlayerPose = 'stand' | 'walk' | 'jump' | 'fall' | 'hang';
 
 export class Player {
   x = 0;
@@ -80,6 +83,8 @@ export class Player {
   fallDistance = 0;
   /** Index of the lift being stood on, or -1. Kept so the next step can carry them. */
   ridingLift = -1;
+  /** The rope being held, and how far down it, or null. */
+  ropeGrip: { id: string; distance: number } | null = null;
 
   private coyoteMs = 0;
   private jumpBufferMs = 0;
@@ -90,6 +95,8 @@ export class Player {
    * back into it. Cleared the moment the player is standing clear of them all.
    */
   private teleportHeld = true;
+  /** Stops a rope being caught again the instant it is let go of. */
+  private ropeCooldownMs = 0;
 
   constructor(private readonly tuning: PlayerTuning = DEFAULT_TUNING) {}
 
@@ -98,6 +105,7 @@ export class Player {
   }
 
   get pose(): PlayerPose {
+    if (this.ropeGrip !== null) return 'hang';
     if (!this.onGround) return this.vy < 0 ? 'jump' : 'fall';
     return this.vx === 0 ? 'stand' : 'walk';
   }
@@ -116,6 +124,8 @@ export class Player {
     this.onGround = false;
     this.fallDistance = fallDistance;
     this.ridingLift = -1;
+    this.ropeGrip = null;
+    this.ropeCooldownMs = 0;
     this.coyoteMs = 0;
     this.jumpBufferMs = 0;
     this.jumpWasHeld = true; // a held jump button must be released before it fires again
@@ -137,9 +147,14 @@ export class Player {
       jumped: false,
       floorsCollapsed: moved.collapsed.length,
       flippedSwitch: false,
+      grabbedRope: false,
       teleported: null,
     };
     this.rideLift(moved.liftDeltas, room);
+
+    // --- ropes -------------------------------------------------------------
+    this.ropeCooldownMs = Math.max(0, this.ropeCooldownMs - dtMs);
+    if (this.holdRope(input, room, result)) return result;
 
     // --- intent ---------------------------------------------------------
     if (input.jump && !this.jumpWasHeld) this.jumpBufferMs = PLAYER.jumpBufferMs;
@@ -273,6 +288,77 @@ export class Player {
     } else {
       this.y += delta.y;
     }
+  }
+
+  /**
+   * Everything to do with hanging off a rope, in one place.
+   *
+   * Returns true when the rope has taken over the step entirely, which it does
+   * whenever the player is holding one: a hanging body is positioned by the
+   * rope and by nothing else, so gravity, walking and collision all sit this
+   * one out.
+   */
+  private holdRope(input: PlayerInput, room: Room, result: StepResult): boolean {
+    const ropes = room.data.ropes;
+    if (ropes === undefined || ropes.length === 0) return false;
+
+    const jumpPressed = input.jump && !this.jumpWasHeld;
+
+    if (this.ropeGrip !== null) {
+      const def = ropes.find((rope) => rope.id === this.ropeGrip?.id);
+      if (def === undefined) {
+        this.ropeGrip = null;
+        return false;
+      }
+
+      // Letting go leaves from wherever the rope has got you to, with an
+      // ordinary jump. No momentum is carried: there is none anywhere else.
+      //
+      // The jump is handed to the ordinary jump path rather than done here, by
+      // granting the coyote time that path already looks for. Setting the
+      // velocity directly would spend this step's gravity on the way up and
+      // leave the jump four pixels short of every other jump in the game.
+      if (jumpPressed) {
+        this.ropeGrip = null;
+        this.ropeCooldownMs = PLAYER.ropeCooldownMs;
+        this.coyoteMs = PLAYER.coyoteTimeMs;
+        this.vy = 0;
+        this.fallDistance = 0;
+        return false;
+      }
+
+      const at = ropePoint(def, room.seconds, this.ropeGrip.distance);
+      this.x = at.x - PLAYER.width / 2;
+      this.y = at.y;
+      this.vx = 0;
+      this.vy = 0;
+      this.onGround = false;
+      this.fallDistance = 0;
+      this.jumpWasHeld = input.jump;
+      this.animMs = 0;
+      return true;
+    }
+
+    if (this.onGround || this.ropeCooldownMs > 0) return false;
+
+    // Caught by the hands, which are the top middle of the body.
+    const hands = { x: this.x + PLAYER.width / 2, y: this.y + 2 };
+    for (const def of ropes) {
+      const distance = gripDistance(def, room.seconds, hands.x, hands.y, PLAYER.ropeReach);
+      if (distance === null) continue;
+      this.ropeGrip = { id: def.id, distance };
+      result.grabbedRope = true;
+      const at = ropePoint(def, room.seconds, distance);
+      this.x = at.x - PLAYER.width / 2;
+      this.y = at.y;
+      this.vx = 0;
+      this.vy = 0;
+      this.fallDistance = 0;
+      this.jumpWasHeld = input.jump;
+      return true;
+    }
+
+    return false;
   }
 
   /** The teleport the player is standing in, if any. */

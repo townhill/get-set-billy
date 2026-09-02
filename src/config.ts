@@ -70,6 +70,12 @@ export const PLAYER = {
 
   /** How fast the walk cycle advances, in milliseconds per frame. */
   animFrameMs: 90,
+
+  /** How close a hand has to come to a rope to catch it, in pixels. */
+  ropeReach: 6,
+
+  /** How long after letting go of a rope before it can be caught again, in milliseconds. */
+  ropeCooldownMs: 250,
 } as const;
 
 export const WORLD = {
@@ -97,6 +103,24 @@ export const WORLD = {
    * ledge rather than a hairline.
    */
   liftHeight: 8,
+  /** How long the room's name stays on screen when you walk in, in milliseconds. */
+  roomTitleMs: 1400,
+} as const;
+
+export const FLASH = {
+  /**
+   * How long each colour of a collectable's flash lasts, in milliseconds.
+   *
+   * Six colours at 110ms is about nine changes a second, which is inside the
+   * range associated with photosensitive seizures. It is also exactly the look
+   * the game is going for, so it stays the default and the alternative is one
+   * key away rather than buried.
+   */
+  itemMs: 110,
+  /** The gentler setting: two colours, slowly. */
+  reducedMs: 480,
+  /** How many of the flash colours the reduced setting uses. */
+  reducedColours: 2,
 } as const;
 
 export const AUDIO = {
@@ -109,6 +133,7 @@ export const AUDIO = {
 export const SAVE = {
   storageKey: 'peculiar-house/save/v1',
   settingsKey: 'peculiar-house/settings/v1',
+  recordsKey: 'peculiar-house/records/v1',
 } as const;
 
 /**

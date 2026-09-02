@@ -4,6 +4,7 @@ import { PixelText } from '../render/PixelText';
 import { keys } from '../render/textures';
 import { formatDuration } from '../state/GameState';
 import { audio } from '../systems/AudioSystem';
+import type { RunRecord } from '../systems/SaveSystem';
 import { input } from '../systems/InputSystem';
 
 /** A few of the things you carried out with you, bobbing about in celebration. */
@@ -16,6 +17,10 @@ export interface VictoryData {
   elapsedMs: number;
   deaths: number;
   livesLeft: number;
+  /** True when this run was faster than every one before it. */
+  isBest?: boolean;
+  /** The fastest run so far, which on a first finish is this one. */
+  best?: RunRecord | null;
 }
 
 /** The end. Such as it is. */
@@ -58,16 +63,25 @@ export class VictoryScene extends Phaser.Scene {
       x: GAME_WIDTH / 2,
       y: 78,
       maxChars: 42,
-      lines: 5,
+      lines: 6,
       originX: 0.5,
       colour: 'W',
     });
+    const best = data.best ?? null;
+    const footer =
+      data.isBest === true
+        ? 'A NEW BEST. NOBODY IS MORE SURPRISED.'
+        : best === null
+          ? ''
+          : `BEST SO FAR ${formatDuration(best.elapsedMs)}`;
+
     body.setText([
       'THE DOOR CLOSES BEHIND YOU. IT SOUNDS',
       'ALMOST DISAPPOINTED.',
       '',
       `ALL ${data.collected} OF ${data.total} THINGS IN ${formatDuration(data.elapsedMs)}`,
       `${data.deaths} MISHAPS, ${data.livesLeft} LIVES TO SPARE`,
+      footer,
     ]);
 
     const prompt = new PixelText(this, {

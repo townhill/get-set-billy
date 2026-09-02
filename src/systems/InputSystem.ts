@@ -8,7 +8,8 @@ import type { PlayerInput } from '../objects/Player';
  * whole thing testable and free of scene lifecycle surprises.
  */
 
-export type Action = 'jump' | 'restartRoom' | 'pause' | 'mute' | 'confirm' | 'menuUp' | 'menuDown';
+export type Action =
+  'jump' | 'restartRoom' | 'pause' | 'mute' | 'flash' | 'confirm' | 'menuUp' | 'menuDown';
 
 const HELD_LEFT = ['ArrowLeft', 'KeyA'];
 const HELD_RIGHT = ['ArrowRight', 'KeyD'];
@@ -22,6 +23,7 @@ const ACTION_KEYS: Record<Action, string[]> = {
   restartRoom: ['KeyR'],
   pause: ['Escape', 'KeyP'],
   mute: ['KeyM'],
+  flash: ['KeyF'],
   confirm: ['Enter', 'Space'],
   menuUp: ['ArrowUp', 'KeyW'],
   menuDown: ['ArrowDown', 'KeyS'],

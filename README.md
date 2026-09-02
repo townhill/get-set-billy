@@ -102,6 +102,7 @@ Then open <http://localhost:5173>. Vite hot-reloads as you edit.
 | Restart the current room | `R` — **this costs a life** | X                          |
 | Pause, and see the map   | `Esc` or `P`                | Start                      |
 | Sound on/off             | `M`                         | —                          |
+| Gentler flashing         | `F`                         | —                          |
 | Choose a menu option     | `↑` / `↓`                   | D-pad up/down              |
 | Confirm                  | `Space` or `Enter`          | A, or Start                |
 
@@ -119,6 +120,10 @@ Notes on how it feels, all of which are deliberate:
   carries you down into the room below keeps counting.
 - `R` costs a life on purpose: it is the way out of a spot you cannot escape,
   not a free retry.
+- **A rope carries you; it never flings you.** Letting go leaves you exactly
+  where the rope had got you to, with an ordinary fixed-height jump. That is the
+  same rule as everything else, and it is why every gap in the house is still
+  exactly as wide as it looks. What a rope adds is reach and timing, not physics.
 - **Leaving through the ceiling** counts once half the player is through the
   gap, rather than all of them. Walking off the side or falling out of the
   bottom carries you onward whatever happens, so those wait until you are
@@ -146,6 +151,7 @@ src/
     Player.ts              Movement model (no Phaser)
     Enemy.ts               Enemy motion as a pure function of time (no Phaser)
     Lift.ts                Moving ledges, likewise (no Phaser)
+    Rope.ts                Swinging ropes, likewise (no Phaser)
     paths.ts               Walking a closed loop of points (no Phaser)
 
   world/
@@ -188,7 +194,7 @@ src/
 Phaser draws things and runs the loop. It does not decide anything.
 
 All the rules — movement, collision, enemy paths, room structure, game state,
-saving — live in modules that import no Phaser at all. That is why 409 tests can
+saving — live in modules that import no Phaser at all. That is why 450 tests can
 run in a plain Node environment with no canvas and no WebGL, and it is why
 `GameScene` is mostly sequencing rather than logic.
 
@@ -300,6 +306,12 @@ global and keyed by id, so an item stays collected when you come back.
 `entrySpawn` records the edge you came in through, so dying returns you to where
 you entered the room rather than to some fixed point.
 
+### Best times
+
+Finishing the house records the run, and the fastest ten are kept. The title
+screen shows the time to beat once there is one, and nothing at all before that:
+an empty scoreboard on a game nobody has finished is just a reproach.
+
 ### Saving
 
 `SaveSystem` writes a snapshot to `localStorage` after every room change, every
@@ -341,11 +353,20 @@ The game runs at a logical 256×192 (a 256×160 playfield plus a 32-pixel status
 panel) and is scaled up by a whole number of pixels to fit the window, so every
 pixel on screen is a perfect square block. Nothing is ever smoothed.
 
+Collectables flash through six colours about nine times a second, which is the
+look the game is going for and is also inside the range associated with
+photosensitive seizures. `F` slows it to a gentle two-colour pulse, and the
+setting is remembered. It is one key rather than a menu on purpose.
+
 Themes give each room its own two-colour scheme in the manner of the period,
 without ever making anything hard to read. Enemies and decorations are always
 different colours from each other, on purpose.
 
 ### Audio
+
+Each theme has three notes of its own, played as you walk in — the roof gets the
+highest in the house, the cellar the lowest. A theme is what a room is like, and
+what a room is like includes what it sounds like when the door shuts behind you.
 
 Every sound is a square wave generated on the spot with the Web Audio API. There
 are no audio files, so there is nothing that can fail to load. If the browser has
@@ -603,6 +624,28 @@ different situation from reaching it with them the other, and treating the two a
 the same would let the solver stitch a route together out of halves that never
 existed at the same moment.
 
+### 5c. Ropes
+
+```json
+"ropes": [{ "id": "hall-rope", "cx": 216, "cy": 16, "length": 52, "arc": 50, "speed": 45 }]
+```
+
+A rope hangs from a pivot and swings — the same shape as a pendulum enemy,
+because it is one; the difference is that this one you hold on to rather than
+die of. Jump at it and you catch it wherever your hands met it, and hang from
+there. Press jump again to let go.
+
+**Letting go does not fling you**, and that is the whole design of it. The game
+has no momentum anywhere else and it does not get any here: you leave from
+wherever the rope had carried you to, with exactly the jump you would get off
+the floor. A rope adds reach and timing, not physics.
+
+**Nothing in the house may depend on a rope**, and that guarantee comes free
+rather than by anybody remembering it. The reachability solver holds one input
+for a whole attempt, so it cannot do the "hang on, and let go at the right
+moment" that a rope needs — which means it proves every room navigable without
+using them. A rope is always a shortcut, never the only way.
+
 ### 6a. Teleport cupboards
 
 ```json
@@ -698,7 +741,7 @@ room. A broken room fails the build.
 npm test
 ```
 
-409 tests, in a plain Node environment — no browser, no canvas, no Phaser.
+450 tests, in a plain Node environment — no browser, no canvas, no Phaser.
 
 | File                         | Covers                                                                                                                                                                  |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

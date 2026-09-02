@@ -9,7 +9,7 @@ import { audio } from '../systems/AudioSystem';
 import { input } from '../systems/InputSystem';
 import { SaveSystem } from '../systems/SaveSystem';
 import { TOTAL_ITEMS } from '../world/RoomManager';
-import type { GameStateSnapshot } from '../state/GameState';
+import { type GameStateSnapshot, formatDuration } from '../state/GameState';
 
 /**
  * Title screen, menu and instructions, with a small unexplained procession
@@ -116,6 +116,20 @@ export class TitleScene extends Phaser.Scene {
     }
     this.options.push({ label: 'NEW GAME', action: () => this.startGame(undefined) });
 
+    // A time to beat, once there is one. Nothing at all before that: an empty
+    // scoreboard on a game nobody has finished is just a reproach.
+    const best = SaveSystem.bestRun();
+    if (best !== null) {
+      const label = new PixelText(this, {
+        x: GAME_WIDTH / 2,
+        y: MENU_Y + this.options.length * 11 + 4,
+        maxChars: 34,
+        originX: 0.5,
+        colour: 'Y',
+      });
+      label.setText(`BEST ESCAPE  ${formatDuration(best.elapsedMs)}  ${best.deaths} MISHAPS`);
+    }
+
     this.menuLabels = this.options.map((option, index) => {
       const label = new PixelText(this, {
         x: GAME_WIDTH / 2,
@@ -141,7 +155,7 @@ export class TitleScene extends Phaser.Scene {
     controls.setText([
       'ARROWS OR A/D TO WALK   SPACE/UP TO JUMP',
       'R RESTARTS A ROOM (AND COSTS YOU A LIFE)',
-      'ESC PAUSES   M FOR SOUND   PADS WELCOME',
+      'ESC MAP  M SOUND  F GENTLER FLASHING',
       'UP/DOWN TO CHOOSE, SPACE OR ENTER TO GO',
     ]);
   }

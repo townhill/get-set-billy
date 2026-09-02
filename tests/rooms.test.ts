@@ -16,6 +16,7 @@ import { THEMES } from '../src/assets/themes';
 import { ENEMY_SPRITES, ITEM_SPRITES } from '../src/assets/sprites';
 import { enemyBox, enemyPeriod, enemyPosition } from '../src/objects/Enemy';
 import { liftBox, liftPeriod } from '../src/objects/Lift';
+import { ropePeriod, ropePoint } from '../src/objects/Rope';
 import { boxesOverlap, insetBox, overlapsHazard } from '../src/systems/CollisionSystem';
 
 /**
@@ -254,6 +255,25 @@ describe.each(ALL_ROOM_DATA.map((room) => [room.id, room] as const))('%s', (id, 
     }
   });
 
+  it('does not drop the player straight onto a resident', () => {
+    // The room clock restarts at zero every time you walk in, so where every
+    // enemy is at the moment of arrival is exactly computable. Arriving inside
+    // one costs a life through no fault of the player's, and then does it again.
+    for (const [key, point] of Object.entries(data.spawns)) {
+      const hitbox = insetBox(
+        { x: point.x, y: point.y, width: PLAYER.width, height: PLAYER.height },
+        PLAYER.hazardInset,
+      );
+      for (const enemy of data.enemies ?? []) {
+        const sprite = ENEMY_SPRITES[enemy.sprite];
+        const box = insetBox(enemyBox(enemy, 0, sprite), 1);
+        expect(boxesOverlap(hitbox, box), `${id} spawn "${key}" arrives inside "${enemy.id}"`).toBe(
+          false,
+        );
+      }
+    }
+  });
+
   it('leaves every collectable somewhere it can actually be picked up', () => {
     for (const item of data.items ?? []) {
       const box = { x: item.x, y: item.y, width: TILE_SIZE, height: TILE_SIZE };
@@ -298,6 +318,70 @@ describe.each(ALL_ROOM_DATA.map((room) => [room.id, room] as const))('%s', (id, 
       expect(top, `${enemy.id} goes off the top`).toBeGreaterThanOrEqual(0);
       expect(right, `${enemy.id} goes off the right`).toBeLessThanOrEqual(maxX);
       expect(bottom, `${enemy.id} goes off the bottom`).toBeLessThanOrEqual(maxY);
+    }
+  });
+});
+
+/**
+ * The rules a rope has to follow.
+ *
+ * A rope is not solid and cannot trap anybody, so there is little to get wrong
+ * — but it does swing, and a rope that swings into a wall looks broken and
+ * hangs the player inside the masonry. Its whole sweep has to be clear.
+ *
+ * Nothing in the house may *depend* on a rope, and that guarantee comes free:
+ * the reachability solver only ever holds one input for a whole attempt, so it
+ * cannot do the "hang on, then let go at the right moment" that a rope needs.
+ * It therefore proves every room reachable without using them.
+ */
+describe('ropes', () => {
+  const ropes = ALL_ROOM_DATA.flatMap((data) =>
+    (data.ropes ?? []).map((rope) => [`${data.id}/${rope.id}`, data.id, rope] as const),
+  );
+
+  it('are used somewhere', () => {
+    expect(ropes.length).toBeGreaterThan(0);
+  });
+
+  it.each(ropes)('%s swings clear of everything solid', (_label, roomId, rope) => {
+    const room = rooms.get(roomId);
+    const period = ropePeriod(rope);
+
+    for (let i = 0; i <= 240; i++) {
+      const seconds = (period * i) / 240;
+      for (let along = 0; along <= rope.length; along += 2) {
+        const at = ropePoint(rope, seconds, along);
+        expect(at.x, `${rope.id} swings off the left`).toBeGreaterThanOrEqual(0);
+        expect(at.y, `${rope.id} swings off the top`).toBeGreaterThanOrEqual(0);
+        expect(at.x, `${rope.id} swings off the right`).toBeLessThanOrEqual(ROOM_COLS * TILE_SIZE);
+        expect(at.y, `${rope.id} swings off the bottom`).toBeLessThanOrEqual(ROOM_ROWS * TILE_SIZE);
+
+        const col = Math.floor(at.x / TILE_SIZE);
+        const row = Math.floor(at.y / TILE_SIZE);
+        expect(room.solidAt(col, row), `${rope.id} swings through a wall`).toBe(false);
+      }
+    }
+  });
+
+  it.each(ropes)('%s hangs somewhere a body actually fits', (_label, roomId, rope) => {
+    const room = rooms.get(roomId);
+    const period = ropePeriod(rope);
+
+    // Wherever the rope can put a hanging player, that player must not be
+    // inside anything: a rope is not a way to be posted through a floor.
+    for (let i = 0; i <= 120; i++) {
+      const at = ropePoint(rope, (period * i) / 120, rope.length);
+      const box = {
+        x: at.x - PLAYER.width / 2,
+        y: at.y,
+        width: PLAYER.width,
+        height: PLAYER.height,
+      };
+      for (let col = Math.floor(box.x / TILE_SIZE); col * TILE_SIZE < box.x + box.width; col++) {
+        for (let row = Math.floor(box.y / TILE_SIZE); row * TILE_SIZE < box.y + box.height; row++) {
+          expect(room.solidAt(col, row), `${rope.id} hangs you inside a wall`).toBe(false);
+        }
+      }
     }
   });
 });

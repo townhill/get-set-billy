@@ -77,6 +77,9 @@ const EFFECTS = {
 
 export type SoundName = keyof typeof EFFECTS;
 
+/** Middle A, which every theme's sting is measured in semitones from. */
+const STING_ROOT = 440;
+
 /** A short, cheerful, slightly wrong little tune for the title screen. */
 const TITLE_TUNE: Note[] = [
   { freq: 392, duration: 0.16 },
@@ -179,6 +182,23 @@ class AudioSystem {
 
   play(name: SoundName): void {
     this.playNotes(EFFECTS[name]);
+  }
+
+  /**
+   * The three notes a room plays as you walk into it.
+   *
+   * Quiet and quick on purpose: it has to say "somewhere else now" without
+   * getting in the way of the next thing you do, which is usually jumping.
+   */
+  playSting(semitones: readonly [number, number, number]): void {
+    this.playNotes(
+      semitones.map((step, index) => ({
+        freq: STING_ROOT * Math.pow(2, step / 12),
+        duration: 0.09,
+        at: index * 0.055,
+        gain: 0.3,
+      })),
+    );
   }
 
   playTitleTune(): void {

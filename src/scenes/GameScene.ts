@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
 import {
   FIXED_STEP_MS,
+  FLASH,
+  GAME_WIDTH,
   MAX_STEPS_PER_FRAME,
   PLAYER,
   PLAY_HEIGHT,
@@ -9,12 +11,14 @@ import {
   isDebugEnabled,
 } from '../config';
 import { ENEMY_SPRITES, ITEM_SPRITES, DOOR_HEIGHT, DOOR_WIDTH } from '../assets/sprites';
-import { ITEM_FLASH_COLOURS } from '../assets/palette';
+import { ITEM_FLASH_COLOURS, paletteHex } from '../assets/palette';
 import { type ThemeDef, themeFor } from '../assets/themes';
+import { PixelText } from '../render/PixelText';
 import { buildRoomTexture, keys } from '../render/textures';
 import { Player } from '../objects/Player';
 import { enemyBox, enemyFacing } from '../objects/Enemy';
 import { liftBox } from '../objects/Lift';
+import { ropeEnd, ropePoint } from '../objects/Rope';
 import { boxesOverlap, insetBox, type Box } from '../systems/CollisionSystem';
 import { audio } from '../systems/AudioSystem';
 import { input } from '../systems/InputSystem';
@@ -93,8 +97,14 @@ export class GameScene extends Phaser.Scene {
   /** One row of deck segments per lift, since a lift is as wide as it says. */
   private liftImages: Phaser.GameObjects.Image[][] = [];
   private teleportImages: Phaser.GameObjects.Image[] = [];
+  /** Ropes are lines rather than tiles, so they are the one thing drawn as vectors. */
+  private ropeGraphics: Phaser.GameObjects.Graphics | null = null;
   private itemImages = new Map<string, Phaser.GameObjects.Image>();
   private map: MapOverlay | null = null;
+  private roomTitle: PixelText | null = null;
+  private roomTitleMs = 0;
+  /** The gentler collectable flash. Off by default; remembered when turned on. */
+  private reducedFlashing = false;
 
   constructor() {
     super('GameScene');
@@ -114,6 +124,17 @@ export class GameScene extends Phaser.Scene {
     this.playerImage = this.add.image(0, 0, '__DEFAULT').setOrigin(0, 0).setDepth(DEPTH.player);
     this.hud = new Hud(this);
     this.map = new MapOverlay(this, DEPTH.overlay);
+    this.ropeGraphics = this.add.graphics().setDepth(DEPTH.tiles);
+    this.reducedFlashing = SaveSystem.loadSettings().reducedFlashing;
+
+    this.roomTitle = new PixelText(this, {
+      x: GAME_WIDTH / 2,
+      y: 12,
+      maxChars: 42,
+      originX: 0.5,
+      colour: 'W',
+      depth: DEPTH.overlay - 1,
+    });
 
     if (isDebugEnabled()) {
       this.debug = new DebugOverlay(this);
@@ -169,8 +190,21 @@ export class GameScene extends Phaser.Scene {
     this.player.placeAt(point.x, point.y, options.carryVy ?? 0, options.carryFall ?? 0);
     this.renderPlayer();
 
-    if (options.announce !== false) audio.play('roomChange');
+    if (options.announce !== false) audio.playSting(this.theme.sting);
+    this.announceRoom();
     this.autosave();
+  }
+
+  /**
+   * The room's name, briefly, in the playfield.
+   *
+   * It was already in the status panel, where it is easy to miss entirely —
+   * particularly since the panel is also where the house talks back to you, so
+   * the name is often not even showing when you arrive.
+   */
+  private announceRoom(): void {
+    this.roomTitle?.setText(this.room.name.toUpperCase()).setColour(this.theme.ledgeInk);
+    this.roomTitleMs = WORLD.roomTitleMs;
   }
 
   private clearRoomObjects(): void {
@@ -303,6 +337,11 @@ export class GameScene extends Phaser.Scene {
       if (this.deathTimerMs <= 0) this.finishDying();
     }
 
+    if (this.roomTitleMs > 0) {
+      this.roomTitleMs = Math.max(0, this.roomTitleMs - deltaMs);
+      if (this.roomTitleMs === 0) this.roomTitle?.setText('');
+    }
+
     this.lockedNoiseCooldownMs = Math.max(0, this.lockedNoiseCooldownMs - deltaMs);
     this.gateNagCooldownMs = Math.max(0, this.gateNagCooldownMs - deltaMs);
 
@@ -319,6 +358,12 @@ export class GameScene extends Phaser.Scene {
     if (input.justPressed('mute')) {
       const muted = audio.toggleMute();
       this.hud.say(muted ? 'SOUND OFF' : 'SOUND ON', 900, 'C');
+    }
+
+    if (input.justPressed('flash')) {
+      this.reducedFlashing = !this.reducedFlashing;
+      SaveSystem.saveSettings({ reducedFlashing: this.reducedFlashing });
+      this.hud.say(this.reducedFlashing ? 'GENTLE FLASHING' : 'FULL FLASHING', 1200, 'C');
     }
 
     if (input.justPressed('pause')) {
@@ -554,12 +599,22 @@ export class GameScene extends Phaser.Scene {
     this.mode = 'finished';
     audio.play('victory');
     SaveSystem.clear();
+
+    const elapsedMs = this.state.elapsedMs;
+    const { isBest } = SaveSystem.recordRun({
+      elapsedMs,
+      deaths: this.state.deaths,
+      finishedAt: Date.now(),
+    });
+
     this.scene.start('VictoryScene', {
       collected: this.state.collectedCount,
       total: TOTAL_ITEMS,
-      elapsedMs: this.state.elapsedMs,
+      elapsedMs,
       deaths: this.state.deaths,
       livesLeft: this.state.lives,
+      isBest,
+      best: SaveSystem.bestRun(),
     });
   }
 
@@ -574,6 +629,7 @@ export class GameScene extends Phaser.Scene {
   private render(deltaMs: number): void {
     this.renderPlayer();
     this.renderLifts();
+    this.renderRopes();
     this.renderTeleports();
     this.renderEnemies();
     this.renderItems();
@@ -641,6 +697,36 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * A rope, drawn as a line of pixels from its pivot to its knot.
+   *
+   * The only thing in the game not made of eight-by-eight tiles, because a
+   * swinging diagonal cannot be. Plotted a pixel at a time along the line so it
+   * still looks hand-drawn rather than anti-aliased.
+   */
+  private renderRopes(): void {
+    const g = this.ropeGraphics;
+    if (g === null) return;
+    g.clear();
+
+    const ropes = this.room.data.ropes ?? [];
+    if (ropes.length === 0) return;
+
+    const seconds = this.room.seconds;
+    g.fillStyle(paletteHex('y'), 1);
+
+    for (const def of ropes) {
+      for (let along = 2; along <= def.length; along += 2) {
+        const at = ropePoint(def, seconds, along);
+        g.fillRect(Math.round(at.x), Math.round(at.y), 1, 1);
+      }
+      const knot = ropeEnd(def, seconds);
+      g.fillStyle(paletteHex('Y'), 1);
+      g.fillRect(Math.round(knot.x) - 1, Math.round(knot.y) - 1, 3, 3);
+      g.fillStyle(paletteHex('y'), 1);
+    }
+  }
+
   private renderTeleports(): void {
     const frame = Math.floor(this.room.elapsedMs / 130) % 4;
     for (const image of this.teleportImages) image.setTexture(keys.teleport(frame));
@@ -662,13 +748,15 @@ export class GameScene extends Phaser.Scene {
   }
 
   private renderItems(): void {
-    const colour = Math.floor(this.room.elapsedMs / 110) % ITEM_FLASH_COLOURS.length;
+    const step = this.reducedFlashing ? FLASH.reducedMs : FLASH.itemMs;
+    const shades = this.reducedFlashing ? FLASH.reducedColours : ITEM_FLASH_COLOURS.length;
+    const colour = Math.floor(this.room.elapsedMs / step) % shades;
     for (const [id, image] of this.itemImages) {
       const item = (this.room.data.items ?? []).find((i) => i.id === id);
       if (!item) continue;
       const lock = KEY_ITEMS.get(id);
       if (lock !== undefined) {
-        image.setTexture(keys.keyItem(lock, Math.floor(this.room.elapsedMs / 260) % 2));
+        image.setTexture(keys.keyItem(lock, Math.floor(this.room.elapsedMs / step) % 2));
         continue;
       }
       const name = item.sprite in ITEM_SPRITES ? item.sprite : 'teacup';
@@ -749,6 +837,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private teardown(): void {
+    this.ropeGraphics?.destroy();
+    this.ropeGraphics = null;
+    this.roomTitle?.destroy();
+    this.roomTitle = null;
     this.hidePauseOverlay();
     this.map?.destroy();
     this.map = null;

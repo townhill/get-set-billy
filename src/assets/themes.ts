@@ -32,6 +32,15 @@ export interface ThemeDef {
   conveyorShade: PaletteKey;
   crumbleInk: PaletteKey;
   crumbleShade: PaletteKey;
+
+  /**
+   * Three notes, played on the way in.
+   *
+   * A theme is what a room is like, and what a room is like includes what it
+   * sounds like when the door shuts behind you. Semitones relative to a middle
+   * A, so the table stays readable as music rather than as frequencies.
+   */
+  sting: readonly [number, number, number];
 }
 
 const base = {
@@ -43,11 +52,13 @@ const base = {
   conveyorShade: 'K',
   crumbleInk: 'y',
   crumbleShade: 'r',
+  sting: [0, 4, 7],
 } satisfies Partial<ThemeDef>;
 
 export const THEMES: Readonly<Record<string, ThemeDef>> = {
   hall: {
     ...base,
+    sting: [0, 4, 7],
     wall: 'panel',
     wallInk: 'r',
     wallShade: 'y',
@@ -61,6 +72,7 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   library: {
     ...base,
+    sting: [0, 3, 7],
     wall: 'shelving',
     wallInk: 'y',
     wallShade: 'r',
@@ -74,6 +86,7 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   attic: {
     ...base,
+    sting: [0, 5, 12],
     wall: 'plank',
     wallInk: 'y',
     wallShade: 'K',
@@ -87,6 +100,7 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   boiler: {
     ...base,
+    sting: [-12, -8, -5],
     wall: 'riveted',
     wallInk: 'r',
     wallShade: 'K',
@@ -104,6 +118,7 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   conservatory: {
     ...base,
+    sting: [2, 7, 11],
     wall: 'glazing',
     wallInk: 'c',
     wallShade: 'C',
@@ -119,6 +134,7 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   clock: {
     ...base,
+    sting: [0, 6, 12],
     wall: 'panel',
     wallInk: 'y',
     wallShade: 'K',
@@ -132,6 +148,7 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   corridor: {
     ...base,
+    sting: [0, 2, 4],
     wall: 'brick',
     wallInk: 'b',
     wallShade: 'K',
@@ -145,6 +162,7 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   laboratory: {
     ...base,
+    sting: [1, 6, 10],
     wall: 'riveted',
     wallInk: 'm',
     wallShade: 'K',
@@ -162,6 +180,7 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   roof: {
     ...base,
+    sting: [7, 12, 16],
     wall: 'stone',
     wallInk: 'b',
     wallShade: 'K',
@@ -175,6 +194,7 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   cellar: {
     ...base,
+    sting: [-12, -9, -5],
     wall: 'rubble',
     wallInk: 'g',
     wallShade: 'K',
@@ -190,6 +210,7 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   gallery: {
     ...base,
+    sting: [0, 4, 9],
     wall: 'panel',
     wallInk: 'm',
     wallShade: 'K',
@@ -203,6 +224,7 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   kitchen: {
     ...base,
+    sting: [0, 5, 9],
     wall: 'chequer',
     wallInk: 'w',
     wallShade: 'c',
@@ -218,6 +240,7 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   billiards: {
     ...base,
+    sting: [-5, 0, 4],
     wall: 'panel',
     wallInk: 'g',
     wallShade: 'K',
@@ -231,6 +254,7 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   landing: {
     ...base,
+    sting: [0, 3, 5],
     wall: 'plank',
     wallInk: 'c',
     wallShade: 'K',

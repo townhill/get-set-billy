@@ -4,6 +4,7 @@ import {
   ENEMY_SPRITES,
   ITEM_SPRITES,
   PLAYER_DEAD,
+  PLAYER_HANG,
   PLAYER_JUMP,
   PLAYER_STAND,
   PLAYER_WALK,
@@ -104,6 +105,7 @@ function buildPlayer(scene: Phaser.Scene): void {
   buildSprite(scene, 'walk', PLAYER_WALK);
   buildSprite(scene, 'jump', PLAYER_JUMP);
   buildSprite(scene, 'fall', PLAYER_JUMP);
+  buildSprite(scene, 'hang', PLAYER_HANG);
   buildSprite(scene, 'dead', PLAYER_DEAD);
 }
 

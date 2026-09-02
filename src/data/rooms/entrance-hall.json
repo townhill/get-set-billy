@@ -84,7 +84,7 @@
       "type": "patrol-v",
       "id": "hall-ghost",
       "sprite": "ghost",
-      "x": 216,
+      "x": 240,
       "from": 40,
       "to": 120,
       "speed": 30
@@ -111,6 +111,16 @@
       "sprite": "crown",
       "x": 160,
       "y": 72
+    }
+  ],
+  "ropes": [
+    {
+      "id": "hall-rope",
+      "cx": 216,
+      "cy": 16,
+      "length": 52,
+      "arc": 50,
+      "speed": 45
     }
   ]
 }

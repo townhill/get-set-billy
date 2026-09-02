@@ -57,6 +57,36 @@ export const PLAYER_STAND = sprite([legs('..CCCC..', '..CCCC..', '.RR..RR.')], 1
 
 export const PLAYER_JUMP = sprite([legs('.CCCCCC.', '.CC..CC.', 'RR....RR')], 1000);
 
+/**
+ * Hanging from a rope: both arms straight up, legs together and dangling.
+ *
+ * Drawn from scratch rather than from the usual head-and-torso pieces, because
+ * the arms have to go above the head and nothing else in the game does that.
+ */
+export const PLAYER_HANG = sprite(
+  [
+    [
+      'C......C',
+      'C......C',
+      'C.WWWW.C',
+      'CWWWWWWC',
+      '.WKWWKW.',
+      '.WWWWWW.',
+      '..WWWW..',
+      '.CCCCCC.',
+      'CCCCCCCC',
+      'CCCCCCCC',
+      '.CCCCCC.',
+      '.CCCCCC.',
+      '..CCCC..',
+      '..CCCC..',
+      '..CCCC..',
+      '..RRRR..',
+    ],
+  ],
+  1000,
+);
+
 /** A brief, undignified end. */
 export const PLAYER_DEAD = sprite(
   [
