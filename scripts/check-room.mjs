@@ -122,6 +122,13 @@ async function main() {
               problems.push(`${who} entering via "${entrance}" cannot collect ${item.id}`);
             }
           }
+          for (const pad of data.teleports ?? []) {
+            if (!found.teleports.has(pad.id)) {
+              problems.push(
+                `${who} entering via "${entrance}" cannot reach the cupboard ${pad.id}`,
+              );
+            }
+          }
           if (data.door !== undefined && !found.door) {
             problems.push(`${who} entering via "${entrance}" cannot reach the front door`);
           }

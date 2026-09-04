@@ -635,24 +635,26 @@ Lifts ignore the tile grid, so nothing stops a badly placed one gliding through
 a wall, or its chain being drawn up through one. `tests/rooms.test.ts` samples
 the whole circuit and the whole shaft above it, and fails if either happens.
 
-What those checks look at is **solid**, though, and a ledge is not solid. A lift
-that glides through a beam, or a chain drawn down through one, passes every test
-in the suite and still looks like a mistake. The same is true of a rope hung
-through a ledge. Nothing enforces it, so it is worth an eye — the quickest check
-is to sample the circuit or the sweep against the tile grid and look for any cell
-that is not air.
+A ledge is not solid, though, so those two checks would happily pass a lift that
+glides through a beam, or a chain drawn down through one — and the same goes for
+a rope hung through a ledge. It looks just as much like a mistake, so the same
+sweeps are run a second time against the authored grid, and every cell they
+touch has to be air or decoration.
 
-**Keep a lift out of any column the player can fall through.** This is the one
-placement mistake that reports itself as something else entirely, so it is worth
-knowing about before it happens rather than afterwards.
+**Keep a lift out of any column the player can fall through**, which is the
+last of the four checks. It is the one placement mistake that used to report
+itself as something else entirely, so it is worth understanding even now that
+the build catches it.
 
 A room with a lift in it is explored several times over, from evenly spaced
 moments in the lift's cycle, and only what _every_ one of those runs can reach
 counts. A lift passing under a hole in the floor therefore catches a player
 dropping through it on some of the runs and not others — and that hole is the
 room's `down` exit. In the runs where the lift caught them, the exit is not
-reachable; it drops out of the intersection; and the room fails a reachability
-test that says nothing whatsoever about lifts and points at the doorway instead.
+reachable; it drops out of the intersection; and the room would fail a
+reachability test that says nothing whatsoever about lifts and points at the
+doorway instead. Hence the check: it fails in `tests/rooms.test.ts` instead,
+naming the lift and the column.
 
 ### 5b. Levers and hatches
 
@@ -791,7 +793,7 @@ room. A broken room fails the build.
 npm test
 ```
 
-604 tests, in a plain Node environment — no browser, no canvas, no Phaser.
+623 tests, in a plain Node environment — no browser, no canvas, no Phaser.
 
 | File                         | Covers                                                                                                                                                                  |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

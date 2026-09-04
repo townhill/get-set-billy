@@ -506,7 +506,7 @@ export const ENEMY_SPRITES: Readonly<Record<string, SpriteDef>> = {
 };
 
 // ---------------------------------------------------------------------------
-// The twenty-five things that must be collected before you are allowed to leave.
+// The thirty-seven things that must be collected before you are allowed to leave.
 // Single ink, so they can flash.
 // ---------------------------------------------------------------------------
 

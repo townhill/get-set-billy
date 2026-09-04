@@ -108,7 +108,7 @@
     {
       "id": "aviary-cupboard",
       "x": 160,
-      "y": 88,
+      "y": 112,
       "to": "organ-cupboard"
     }
   ]

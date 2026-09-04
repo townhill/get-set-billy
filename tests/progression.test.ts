@@ -40,9 +40,19 @@ const rooms = new RoomManager();
  * Two things make that affordable. Results are cached, and a room with no gates
  * in it is cached without the key set at all — its geometry cannot depend on
  * what the player is carrying, so one exploration answers for every stage of
- * the game. Only the five gated rooms are ever explored more than once.
+ * the game. Only the seven gated rooms are ever explored more than once.
  */
 const cache = new Map<string, Reachability>();
+
+/**
+ * How long simulating the whole house, twice over, is allowed to take.
+ *
+ * The slowest test in the suite by a distance, and slower again with every room
+ * added to it. Generous on purpose, for the same reason the per-room limits in
+ * `reachability.test.ts` are: a test that sits on its own time limit fails on a
+ * busy machine and passes on a quiet one, which is worse than a slow test.
+ */
+const HOUSE_TIMEOUT_MS = 120000;
 
 function explored(
   roomId: string,
@@ -208,9 +218,7 @@ describe('no way in without a way out', () => {
       }
 
       expect(stranded).toEqual([]);
-      // Simulating the whole house twice over is slower than the default allows,
-      // and slower again with every room added to it.
     },
-    120000,
+    HOUSE_TIMEOUT_MS,
   );
 });

@@ -28,6 +28,33 @@ import { boxesOverlap, insetBox, overlapsHazard } from '../src/systems/Collision
 
 const rooms = new RoomManager();
 
+/**
+ * Whether a cell has anything at all in it.
+ *
+ * The sweep checks below ask `solidAt`, and a ledge is not solid — so a lift
+ * gliding through a beam, a chain drawn down through one, or a rope hung
+ * through one passes every solidity check in the file and still looks like a
+ * mistake. Read from the authored grid rather than through `charAt`, so an
+ * unlocked gate or a hatch that happens to be open cannot make a bad placement
+ * look fine. Decorations are the exception: they are painted on the background
+ * and nothing is really there.
+ */
+function hasSomethingIn(char: string): boolean {
+  const def = tileDef(char);
+  return def.solid || def.platform || def.hazard !== null || def.lever;
+}
+
+/** The columns a player can drop into or out of a room through. */
+function fallColumns(data: (typeof ALL_ROOM_DATA)[number]): Set<number> {
+  const holes = new Set<number>();
+  for (let col = 0; col < ROOM_COLS; col++) {
+    if (!tileDef(data.tiles[0][col]).solid) holes.add(col);
+    const floor = tileDef(data.tiles[ROOM_ROWS - 1][col]);
+    if (!floor.solid && !floor.platform) holes.add(col);
+  }
+  return holes;
+}
+
 describe('the house as a whole', () => {
   it('has at least ten rooms', () => {
     expect(rooms.size).toBeGreaterThanOrEqual(10);
@@ -363,6 +390,25 @@ describe('ropes', () => {
     }
   });
 
+  it.each(ropes)('%s swings clear of the ledges as well', (_label, roomId, rope) => {
+    const room = rooms.get(roomId);
+    const period = ropePeriod(rope);
+
+    for (let i = 0; i <= 240; i++) {
+      const seconds = (period * i) / 240;
+      for (let along = 0; along <= rope.length; along += 2) {
+        const at = ropePoint(rope, seconds, along);
+        const col = Math.floor(at.x / TILE_SIZE);
+        const row = Math.floor(at.y / TILE_SIZE);
+        const char = room.rawCharAt(col, row);
+        expect(
+          hasSomethingIn(char),
+          `${rope.id} swings through the ${tileDef(char).name} at ${col},${row}`,
+        ).toBe(false);
+      }
+    }
+  });
+
   it.each(ropes)('%s hangs somewhere a body actually fits', (_label, roomId, rope) => {
     const room = rooms.get(roomId);
     const period = ropePeriod(rope);
@@ -438,6 +484,39 @@ describe('teleport cupboards', () => {
 
     throw new Error(`arriving at "${pad.id}" never comes to rest`);
   });
+
+  it.each(pads)('%s does not put you down in front of a resident', (_label, roomId, pad) => {
+    // The doorway check above only knows about tiles: `player.step` sees hazard
+    // cells and falls, never enemies. So a pad in the middle of a patrol route
+    // passes every other test in the file and still costs a life on arrival,
+    // and the spawn check that would have caught it does not look at cupboards.
+    //
+    // Sampling only the moment of arrival is not enough either. A cupboard put
+    // down just behind a patrol is clear at t=0 and hit two frames later, which
+    // is no more survivable and much harder to see coming. Arriving resets the
+    // room clock, so a whole second of it is exactly computable.
+    const room = rooms.get(roomId);
+    const data = room.data;
+    room.reset();
+
+    const player = new Player();
+    player.placeAt(pad.x, pad.y);
+
+    for (let frame = 0; frame <= 60; frame++) {
+      const seconds = (frame * FIXED_STEP_MS) / 1000;
+      player.step({ left: false, right: false, jump: false }, FIXED_STEP_MS / 1000, room);
+      const hitbox = insetBox(player.box, PLAYER.hazardInset);
+
+      for (const enemy of data.enemies ?? []) {
+        const sprite = ENEMY_SPRITES[enemy.sprite];
+        const box = insetBox(enemyBox(enemy, seconds, sprite), 1);
+        expect(
+          boxesOverlap(hitbox, box),
+          `"${pad.id}" puts you inside "${enemy.id}" ${seconds.toFixed(2)}s after arriving`,
+        ).toBe(false);
+      }
+    }
+  });
 });
 
 /**
@@ -508,6 +587,80 @@ describe('lifts', () => {
             room.solidAt(col, row),
             `the chain for ${def.id} is drawn through a wall at row ${row}`,
           ).toBe(false);
+        }
+      }
+    },
+  );
+
+  it.each(withLifts.map((data) => [data.id, data] as const))(
+    '%s keeps every lift and every chain clear of the ledges as well',
+    (id, data) => {
+      const room = rooms.get(id);
+      for (const def of data.lifts ?? []) {
+        const period = liftPeriod(def);
+        const samples = 360;
+        for (let i = 0; i <= samples; i++) {
+          const box = liftBox(def, (period * i) / samples);
+          for (
+            let col = Math.floor(box.x / TILE_SIZE);
+            col * TILE_SIZE < box.x + box.width;
+            col++
+          ) {
+            for (
+              let row = Math.floor(box.y / TILE_SIZE);
+              row * TILE_SIZE < box.y + box.height;
+              row++
+            ) {
+              const char = room.rawCharAt(col, row);
+              expect(
+                hasSomethingIn(char),
+                `${def.id} passes through the ${tileDef(char).name} at ${col},${row}`,
+              ).toBe(false);
+            }
+          }
+        }
+
+        if (!def.points.every((point) => point.x === def.points[0].x)) continue;
+
+        const col = Math.floor((def.points[0].x + def.width / 2) / TILE_SIZE);
+        const highest = Math.min(...def.points.map((point) => point.y));
+        for (let row = 1; row * TILE_SIZE < highest; row++) {
+          const char = room.rawCharAt(col, row);
+          expect(
+            hasSomethingIn(char),
+            `the chain for ${def.id} is drawn through the ${tileDef(char).name} at row ${row}`,
+          ).toBe(false);
+        }
+      }
+    },
+  );
+
+  it.each(withLifts.map((data) => [data.id, data] as const))(
+    '%s keeps every lift out of the columns you fall through',
+    (_id, data) => {
+      // The one placement mistake that reports itself as something else
+      // entirely. A room with a lift is explored from four moments in its
+      // cycle and only what every one of them reaches counts, so a lift passing
+      // under a hole in the floor catches a player dropping through it on some
+      // runs and not others. That hole is the room's `down` exit, so it falls
+      // out of the intersection and the room fails a reachability test that
+      // says nothing whatsoever about lifts and points at the doorway instead.
+      const holes = fallColumns(data);
+      for (const def of data.lifts ?? []) {
+        const period = liftPeriod(def);
+        const samples = 360;
+        for (let i = 0; i <= samples; i++) {
+          const box = liftBox(def, (period * i) / samples);
+          for (
+            let col = Math.floor(box.x / TILE_SIZE);
+            col * TILE_SIZE < box.x + box.width;
+            col++
+          ) {
+            expect(
+              holes.has(col),
+              `${def.id} reaches column ${col}, which the player falls through`,
+            ).toBe(false);
+          }
         }
       }
     },
@@ -587,13 +740,7 @@ describe('gates', () => {
   it.each(gated.map((data) => [data.id, data] as const))(
     '%s keeps them out of the columns you fall through',
     (id, data) => {
-      const holes = new Set<number>();
-      for (let col = 0; col < ROOM_COLS; col++) {
-        if (!tileDef(data.tiles[0][col]).solid) holes.add(col);
-        const floor = tileDef(data.tiles[ROOM_ROWS - 1][col]);
-        if (!floor.solid && !floor.platform) holes.add(col);
-      }
-      for (const col of holes) {
+      for (const col of fallColumns(data)) {
         for (let row = 0; row < ROOM_ROWS; row++) {
           expect(
             lockColour(data.tiles[row][col]),
