@@ -95,5 +95,15 @@
       "y": 24,
       "opens": "iron"
     }
+  ],
+  "ropes": [
+    {
+      "id": "corridor-bellpull",
+      "cx": 120,
+      "cy": 88,
+      "length": 40,
+      "arc": 44,
+      "speed": 50
+    }
   ]
 }

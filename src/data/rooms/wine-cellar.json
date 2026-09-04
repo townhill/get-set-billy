@@ -95,6 +95,23 @@
       "y": 32
     }
   ],
+  "lifts": [
+    {
+      "id": "cellar-hoist",
+      "points": [
+        {
+          "x": 224,
+          "y": 128
+        },
+        {
+          "x": 224,
+          "y": 48
+        }
+      ],
+      "speed": 26,
+      "width": 16
+    }
+  ],
   "teleports": [
     {
       "id": "cellar-cupboard",

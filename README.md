@@ -3,11 +3,11 @@
 An original single-screen platform game, written as if by an ambitious 1980s
 bedroom programmer who had somehow got hold of TypeScript.
 
-You are trapped in a large, eccentric, mildly unreasonable mansion. Twenty-five
-objects are scattered through its fourteen rooms. Find all of them, then find
+You are trapped in a large, eccentric, mildly unreasonable mansion. Thirty-seven
+objects are scattered through its twenty rooms. Find all of them, then find
 the front door, which will not open until you have.
 
-Two of those objects are keys. Parts of the house are barred by gates, and a
+Three of those objects are keys. Parts of the house are barred by gates, and a
 gate stays shut until you are carrying the right key — so the house is not
 simply open from the first second, and there is an order in which it gives way.
 
@@ -595,7 +595,7 @@ flashing colour: `teacup`, `key`, `umbrella`, `monocle`, `biscuit`,
 `jar`, `gramophone`.
 
 The total is counted from the data, so the HUD and the win condition update on
-their own. Adding a collectable changes `25` to `26` everywhere with no other
+their own. Adding a collectable changes `37` to `38` everywhere with no other
 edits.
 
 Keys do not flash through the palette like the other collectables. They are
@@ -632,8 +632,27 @@ animation such a lift can have, since the deck itself must not appear to move
 relative to the feet standing on it.
 
 Lifts ignore the tile grid, so nothing stops a badly placed one gliding through
-a wall, or its chain being drawn through a ledge. `tests/rooms.test.ts` samples
+a wall, or its chain being drawn up through one. `tests/rooms.test.ts` samples
 the whole circuit and the whole shaft above it, and fails if either happens.
+
+What those checks look at is **solid**, though, and a ledge is not solid. A lift
+that glides through a beam, or a chain drawn down through one, passes every test
+in the suite and still looks like a mistake. The same is true of a rope hung
+through a ledge. Nothing enforces it, so it is worth an eye — the quickest check
+is to sample the circuit or the sweep against the tile grid and look for any cell
+that is not air.
+
+**Keep a lift out of any column the player can fall through.** This is the one
+placement mistake that reports itself as something else entirely, so it is worth
+knowing about before it happens rather than afterwards.
+
+A room with a lift in it is explored several times over, from evenly spaced
+moments in the lift's cycle, and only what _every_ one of those runs can reach
+counts. A lift passing under a hole in the floor therefore catches a player
+dropping through it on some of the runs and not others — and that hole is the
+room's `down` exit. In the runs where the lift caught them, the exit is not
+reachable; it drops out of the intersection; and the room fails a reachability
+test that says nothing whatsoever about lifts and points at the doorway instead.
 
 ### 5b. Levers and hatches
 
@@ -695,7 +714,7 @@ written in the grid as `B`, `S`, `I` and `C`, and drawn in that colour in every
 room, so a brass gate is recognisably the brass gate wherever you meet it.
 
 **A key is an ordinary collectable with one extra field.** It counts towards the
-twenty-five like everything else, and which keys you are carrying is worked out
+thirty-seven like everything else, and which keys you are carrying is worked out
 from the items you have collected rather than stored, so adding keys needed no
 change at all to the save format and every save written before they existed
 still loads.
@@ -744,9 +763,10 @@ too.
 
 ### 7. Themes
 
-Pick one of the fourteen in `src/assets/themes.ts` — `hall`, `library`, `attic`,
+Pick one of the nineteen in `src/assets/themes.ts` — `hall`, `library`, `attic`,
 `boiler`, `conservatory`, `clock`, `corridor`, `laboratory`, `roof`, `cellar`,
-`gallery`, `kitchen`, `billiards`, `landing` — or add your own. A theme chooses
+`gallery`, `kitchen`, `billiards`, `landing`, `chimney`, `scullery`, `organ`,
+`bathroom`, `aviary` — or add your own. A theme chooses
 the wall and ledge shapes, the two decorative shapes, and the inks for all of
 them.
 
@@ -771,7 +791,7 @@ room. A broken room fails the build.
 npm test
 ```
 
-464 tests, in a plain Node environment — no browser, no canvas, no Phaser.
+604 tests, in a plain Node environment — no browser, no canvas, no Phaser.
 
 | File                         | Covers                                                                                                                                                                  |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -108,5 +108,15 @@
       "x": 128,
       "y": 24
     }
+  ],
+  "ropes": [
+    {
+      "id": "conservatory-rope",
+      "cx": 108,
+      "cy": 16,
+      "length": 56,
+      "arc": 40,
+      "speed": 44
+    }
   ]
 }

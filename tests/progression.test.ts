@@ -208,8 +208,9 @@ describe('no way in without a way out', () => {
       }
 
       expect(stranded).toEqual([]);
-      // Simulating the whole house twice over is slower than the default allows.
+      // Simulating the whole house twice over is slower than the default allows,
+      // and slower again with every room added to it.
     },
-    30000,
+    120000,
   );
 });
