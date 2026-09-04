@@ -105,5 +105,15 @@
       "x": 200,
       "y": 96
     }
+  ],
+  "ropes": [
+    {
+      "id": "landing-rope",
+      "cx": 224,
+      "cy": 16,
+      "length": 48,
+      "arc": 46,
+      "speed": 48
+    }
   ]
 }

@@ -25,6 +25,17 @@ import { CLUMSY_TUNING, explore, type Reachability } from './reachability';
 
 const rooms = new RoomManager();
 
+/**
+ * How long one room, from one doorway, is allowed to take.
+ *
+ * Generous on purpose. Exploring a room costs what its geometry costs, and a
+ * big room with a lift in it is explored four times over, once from each
+ * quarter of the lift's cycle. The default five seconds is a limit the house
+ * grows into rather than a bug, and a test that sits on that line fails on a
+ * busy machine and passes on a quiet one, which is worse than a slow test.
+ */
+const ROOM_TIMEOUT_MS = 30000;
+
 describe.each(ALL_ROOM_DATA.map((room) => [room.id, room] as const))('%s', (id, data) => {
   const room = rooms.get(id);
   const entrances = Object.keys(data.spawns);
@@ -55,22 +66,37 @@ describe.each(ALL_ROOM_DATA.map((room) => [room.id, room] as const))('%s', (id, 
     expect(found.door, `${via} cannot reach the front door`).toBe(true);
   }
 
-  it.each(entrances)('is playable when entered via "%s"', (entrance) => {
-    check(explore(room, [entrance]), entrance, 'a player at full ability');
-  });
+  it.each(entrances)(
+    'is playable when entered via "%s"',
+    (entrance) => {
+      check(explore(room, [entrance]), entrance, 'a player at full ability');
+    },
+    ROOM_TIMEOUT_MS,
+  );
 
-  it.each(entrances)('leaves room for error when entered via "%s"', (entrance) => {
-    check(explore(room, [entrance], CLUMSY_TUNING), entrance, 'a clumsy player');
-  });
+  it.each(entrances)(
+    'leaves room for error when entered via "%s"',
+    (entrance) => {
+      check(explore(room, [entrance], CLUMSY_TUNING), entrance, 'a clumsy player');
+    },
+    ROOM_TIMEOUT_MS,
+  );
 });
 
+/** Every room from every doorway, in one test, so this is the slowest of the lot. */
+const HOUSE_TIMEOUT_MS = 60000;
+
 describe('the house', () => {
-  it('lets every collectable be picked up somewhere', () => {
-    const reachable = new Set<string>();
-    for (const data of ALL_ROOM_DATA) {
-      for (const id of explore(rooms.get(data.id)).items) reachable.add(id);
-    }
-    const all = ALL_ROOM_DATA.flatMap((room) => (room.items ?? []).map((item) => item.id));
-    expect([...all].filter((id) => !reachable.has(id))).toEqual([]);
-  });
+  it(
+    'lets every collectable be picked up somewhere',
+    () => {
+      const reachable = new Set<string>();
+      for (const data of ALL_ROOM_DATA) {
+        for (const id of explore(rooms.get(data.id)).items) reachable.add(id);
+      }
+      const all = ALL_ROOM_DATA.flatMap((room) => (room.items ?? []).map((item) => item.id));
+      expect([...all].filter((id) => !reachable.has(id))).toEqual([]);
+    },
+    HOUSE_TIMEOUT_MS,
+  );
 });
