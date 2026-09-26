@@ -9,7 +9,9 @@ export default defineConfig({
     assetsDir: 'assets',
     sourcemap: false,
     // Phaser is large and ships as one chunk; this keeps the build output quiet.
-    chunkSizeWarningLimit: 1500,
+    // Nearly all of the bundle is Phaser, so the limit leaves the game's own
+    // code room to grow rather than sitting a few kilobytes above it.
+    chunkSizeWarningLimit: 1600,
   },
   server: {
     host: '0.0.0.0',

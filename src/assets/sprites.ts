@@ -53,29 +53,132 @@ export const PLAYER_WALK = sprite(
   90,
 );
 
-export const PLAYER_STAND = sprite([legs('..CCCC..', '..CCCC..', '.RR..RR.')], 1000);
+/** Standing about, and now and then blinking, which is the whole of the idle animation. */
+export const PLAYER_STAND = sprite(
+  [
+    legs('..CCCC..', '..CCCC..', '.RR..RR.'),
+    [
+      '..MMMM..',
+      '.MMMMMM.',
+      'MMMMMMM.',
+      '.YYYYYY.',
+      '.YyYyYY.',
+      '.YYYYYk.',
+      '..YYYY..',
+      ...PLAYER_TORSO,
+      '..CCCC..',
+      '..CCCC..',
+      '.RR..RR.',
+    ],
+  ],
+  1000,
+);
 
 export const PLAYER_JUMP = sprite([legs('.CCCCCC.', '.CC..CC.', 'RR....RR')], 1000);
 
+/** On the way down: legs together and toes pointed, which is how you tell it from the way up. */
+export const PLAYER_FALL = sprite([legs('..CCCC..', '..CCCC..', '..R..R..')], 1000);
+
 /**
- * Hanging from a rope: both arms straight up, legs together and dangling.
+ * A fall that has already gone too far, and knows it.
  *
+ * Shown from the moment the drop passes the fatal distance, so that the death
+ * waiting at the bottom is announced rather than sprung. Arms windmilling and
+ * mouth open, in two frames, because it should look like a mistake.
+ */
+export const PLAYER_PLUMMET = sprite(
+  [
+    [
+      'Y.MMMM.Y',
+      'CMMMMMMC',
+      'MMMMMMM.',
+      '.YYYYYY.',
+      '.YkYkYY.',
+      '.YYYkkY.',
+      '..YkkY..',
+      '.CCCCCC.',
+      '.CCCCCC.',
+      '.CCCCCC.',
+      '.CCCCCC.',
+      '.CCCCCC.',
+      '.CCCCCC.',
+      '.CC..CC.',
+      'CC....CC',
+      'R......R',
+    ],
+    [
+      '..MMMM..',
+      '.MMMMMM.',
+      'MMMMMMM.',
+      '.YYYYYY.',
+      '.YkYkYY.',
+      '.YYYkkY.',
+      '..YkkY..',
+      '.CCCCCC.',
+      'YCCCCCCY',
+      '.CCCCCC.',
+      '.CCCCCC.',
+      '.CCCCCC.',
+      '.CCCCCC.',
+      '..C..C..',
+      '.CC..CC.',
+      '.R....R.',
+    ],
+  ],
+  90,
+);
+
+/**
+ * Touching down: knees bent and the head a pixel lower, for a moment.
+ *
+ * Still sixteen pixels tall, since the sprite is drawn at exactly the size of
+ * the collision box and a landing is not a reason to change that.
+ */
+export const PLAYER_LAND = sprite(
+  [
+    [
+      '........',
+      '..MMMM..',
+      '.MMMMMM.',
+      'MMMMMMM.',
+      '.YYYYYY.',
+      '.YkYkYY.',
+      '.YYYYYk.',
+      '..YYYY..',
+      '.CCCCCC.',
+      'CCCCCCCC',
+      'CCCCCCCY',
+      '.CCCCCC.',
+      '.CCCCCC.',
+      '.CC..CC.',
+      'CC....CC',
+      'RR....RR',
+    ],
+  ],
+  1000,
+);
+
+/**
+ * Hanging from a rope: both hands on it above the head, legs together and
+ * dangling.
+ *
+ * The rope runs down the middle of the sprite, so that is where the hands go.
  * Drawn from scratch rather than from the usual head-and-torso pieces, because
  * the arms have to go above the head and nothing else in the game does that.
  */
 export const PLAYER_HANG = sprite(
   [
     [
-      'C......C',
-      'C......C',
-      'C.WWWW.C',
-      'CWWWWWWC',
-      '.WKWWKW.',
-      '.WWWWWW.',
-      '..WWWW..',
+      '...YY...',
+      '..C..C..',
+      '.CMMMMC.',
+      '.CMMMMC.',
+      '.CYYYYC.',
+      '.CkYYkC.',
+      '..YYYY..',
       '.CCCCCC.',
       'CCCCCCCC',
-      'CCCCCCCC',
+      '.CCCCCC.',
       '.CCCCCC.',
       '.CCCCCC.',
       '..CCCC..',
@@ -133,6 +236,59 @@ export const PLAYER_DEAD = sprite(
 // ---------------------------------------------------------------------------
 // The residents. All 8x8, two frames each, predictable to a fault.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Vents: a grating in the floor, and what comes out of it. Written in two inks,
+// '1' for the hot middle and '2' for the edges, so steam and flame can share
+// the shapes and differ only in colour.
+// ---------------------------------------------------------------------------
+
+/** One cell of jet, firing. Stacked to make the column; two frames, alternated. */
+export const VENT_JET: readonly Art[] = [
+  ['.2.22.2.', '..2112..', '.211112.', '.211212.', '..2112..', '.21111..', '.212112.', '..2112..'],
+  ['..2.2.2.', '.2112...', '.211112.', '.212112.', '..21112.', '..2112..', '.211112.', '.21112..'],
+];
+
+/** The top cell of a jet: ragged, thinning out into nothing. */
+export const VENT_TIP: readonly Art[] = [
+  ['........', '..2...2.', '....2...', '.2..2...', '...22.2.', '..2112..', '.2.112..', '..2112..'],
+  ['...2....', '......2.', '.2..2...', '...2..2.', '..2.2...', '..2112..', '..2112..', '.21112..'],
+];
+
+/** The sputter before it fires: a few wisps rising off the grating. */
+export const VENT_WARN: readonly Art[] = [
+  ['........', '........', '........', '........', '....2...', '...2....', '..2.2...', '...12...'],
+  ['........', '........', '........', '........', '...2....', '....2...', '...2.2..', '..21....'],
+];
+
+/** The grating itself, drawn on top of the floor whether or not the vent is firing. */
+export const VENT_GRATE: Art = [
+  '........',
+  '........',
+  '........',
+  '........',
+  '........',
+  '........',
+  '12.12.12',
+  '22222222',
+];
+
+/** The two kinds of vent, and the inks each is drawn in: '1', '2', and the grating's '1', '2'. */
+export const VENT_KINDS: Readonly<Record<string, { hot: string; edge: string }>> = {
+  steam: { hot: 'W', edge: 'w' },
+  flame: { hot: 'Y', edge: 'R' },
+};
+
+/** Swaps the placeholder inks in a piece of art for real palette characters. */
+function inked(art: Art, ink: Readonly<Record<string, string>>): Art {
+  return art.map((row) => [...row].map((ch) => ink[ch] ?? ch).join(''));
+}
+
+const ventSprite = (kind: { hot: string; edge: string }): SpriteDef =>
+  sprite(
+    VENT_JET.map((frame) => inked(frame, { '1': kind.hot, '2': kind.edge })),
+    80,
+  );
 
 export const ENEMY_SPRITES: Readonly<Record<string, SpriteDef>> = {
   /** A bowler hat that has learned to walk. */
@@ -503,6 +659,10 @@ export const ENEMY_SPRITES: Readonly<Record<string, SpriteDef>> = {
       '.GGGGG..',
     ],
   ]),
+
+  /** A vent's jet, one cell of it. See VENT_JET; a vent is drawn a cell at a time. */
+  steam: ventSprite(VENT_KINDS.steam),
+  flame: ventSprite(VENT_KINDS.flame),
 };
 
 // ---------------------------------------------------------------------------

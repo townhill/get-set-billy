@@ -82,6 +82,17 @@
       "sprite": "candle",
       "x": 152,
       "y": 96
+    },
+    {
+      "type": "vent",
+      "id": "kitchen-hob",
+      "sprite": "flame",
+      "x": 48,
+      "y": 136,
+      "cells": 2,
+      "period": 3,
+      "on": 1,
+      "phase": 0.3
     }
   ],
   "items": [

@@ -1,5 +1,5 @@
 import type Phaser from 'phaser';
-import { GAME_WIDTH, HUD_HEIGHT, PLAY_HEIGHT } from '../config';
+import { GAME_WIDTH, HUD_HEIGHT, PLAY_HEIGHT, WORLD } from '../config';
 import { LOCK_INKS, type PaletteKey, paletteColour } from '../assets/palette';
 import { ITEM_SPRITES, LIFE_ICON } from '../assets/sprites';
 import { PixelText } from '../render/PixelText';
@@ -16,7 +16,14 @@ import { LOCK_COLOURS, type LockColour } from '../world/tiles';
  */
 
 const LIFE_ICON_KEY = 'hud-life-icon';
-const MAX_LIFE_ICONS = 6;
+const MAX_LIFE_ICONS = WORLD.maxLives;
+/** Heads sit a pixel apart: the art is seven wide in an eight-wide cell. */
+const LIFE_ICON_X = 82;
+const LIFE_ICON_GAP = 8;
+/** How long the item counter lights up after something is found, in milliseconds. */
+const COUNTER_FLASH_MS = 450;
+/** How long a newly earned life blinks in the panel, in milliseconds. */
+const NEW_LIFE_BLINK_MS = 1400;
 /** Each lock gets a fixed slot, so a key never moves once you have it. */
 const KEY_ICON_X = 156;
 const KEY_ICON_GAP = 8;
@@ -24,6 +31,20 @@ const keyIconKey = (lock: LockColour): string => `hud-key-${lock}`;
 const PANEL_TOP = PLAY_HEIGHT;
 const NAME_Y = PANEL_TOP + 5;
 const STATS_Y = PANEL_TOP + 18;
+/** The line between the two rows of the panel, which fills up as things are found. */
+const PROGRESS_Y = PANEL_TOP + 14;
+
+/**
+ * How many pixels of the progress line are filled, for so many things found.
+ *
+ * Rounded down, so the line is only ever full when everything really has been
+ * found, and never looks finished one short.
+ */
+export function progressWidth(collected: number, total: number, width: number): number {
+  if (total <= 0) return 0;
+  const fraction = Math.min(1, Math.max(0, collected / total));
+  return fraction >= 1 ? width : Math.min(width - 1, Math.floor(fraction * width));
+}
 
 export interface HudModel {
   roomName: string;
@@ -50,7 +71,14 @@ export class Hud {
   private messageMs = 0;
   private message: string | null = null;
   private messageColour: PaletteKey = 'Y';
-  private accent: PaletteKey = 'W';
+  /** Lines waiting for the current one to finish. */
+  private queue: { message: string; durationMs: number; colour: PaletteKey }[] = [];
+  /** What the chrome was last drawn for, so it is only redrawn when that changes. */
+  private drawn = { accent: '' as string, filled: -1 };
+  private lastCollected = -1;
+  private counterFlashMs = 0;
+  private lastLives = -1;
+  private newLifeBlinkMs = 0;
 
   constructor(private readonly scene: Phaser.Scene) {
     if (!scene.textures.exists(LIFE_ICON_KEY)) {
@@ -67,11 +95,7 @@ export class Hud {
     }
 
     this.chrome = scene.add.graphics().setDepth(90);
-    this.chrome.fillStyle(0x000000, 1);
-    this.chrome.fillRect(0, PANEL_TOP, GAME_WIDTH, HUD_HEIGHT);
-    this.chrome.fillStyle(0x40e8ff, 1);
-    this.chrome.fillRect(0, PANEL_TOP, GAME_WIDTH, 1);
-    this.chrome.fillRect(0, PANEL_TOP + 14, GAME_WIDTH, 1);
+    this.drawChrome('C', 0);
 
     this.nameLabel = new PixelText(scene, {
       x: GAME_WIDTH / 2,
@@ -110,7 +134,7 @@ export class Hud {
 
     for (let i = 0; i < MAX_LIFE_ICONS; i++) {
       const icon = scene.add
-        .image(96 + i * 10, STATS_Y - 1, LIFE_ICON_KEY)
+        .image(LIFE_ICON_X + i * LIFE_ICON_GAP, STATS_Y - 1, LIFE_ICON_KEY)
         .setOrigin(0, 0)
         .setDepth(92)
         .setVisible(false);
@@ -127,29 +151,76 @@ export class Hud {
     });
   }
 
-  /** Replaces the room name with a temporary line, for the given number of ms. */
+  /**
+   * Replaces the room name with a temporary line, for the given number of ms.
+   * Anything already waiting its turn is dropped: this is the news now.
+   */
   say(message: string, durationMs = 1500, colour: PaletteKey = 'Y'): void {
+    this.queue = [];
     this.message = message;
     this.messageMs = durationMs;
     this.messageColour = colour;
   }
 
+  /**
+   * Shows a line once the current one has had its say, or straight away if
+   * nothing is showing. For news that should not tread on other news.
+   */
+  sayNext(message: string, durationMs = 1500, colour: PaletteKey = 'Y'): void {
+    if (this.message === null) {
+      this.say(message, durationMs, colour);
+      return;
+    }
+    this.queue.push({ message, durationMs, colour });
+  }
+
+  /**
+   * The panel's rules: a line along the top in the room's colour, and one
+   * between the rows that doubles as a progress bar — thin for what is still
+   * missing, thick for what has been found.
+   */
+  private drawChrome(accent: PaletteKey, filled: number): void {
+    if (this.drawn.accent === accent && this.drawn.filled === filled) return;
+    this.drawn = { accent, filled };
+    const ink = parseInt((paletteColour(accent) ?? '#ffffff').slice(1), 16);
+    this.chrome.clear();
+    this.chrome.fillStyle(0x000000, 1);
+    this.chrome.fillRect(0, PANEL_TOP, GAME_WIDTH, HUD_HEIGHT);
+    this.chrome.fillStyle(ink, 1);
+    this.chrome.fillRect(0, PANEL_TOP, GAME_WIDTH, 1);
+    this.chrome.fillRect(0, PROGRESS_Y, GAME_WIDTH, 1);
+    if (filled > 0) this.chrome.fillRect(0, PROGRESS_Y - 1, filled, 3);
+  }
+
   update(model: HudModel, deltaMs: number): void {
     if (this.messageMs > 0) {
       this.messageMs -= deltaMs;
-      if (this.messageMs <= 0) this.message = null;
+      if (this.messageMs <= 0) {
+        this.message = null;
+        const next = this.queue.shift();
+        if (next !== undefined) {
+          this.message = next.message;
+          this.messageMs = next.durationMs;
+          this.messageColour = next.colour;
+        }
+      }
     }
 
-    if (this.accent !== model.accent) {
-      this.accent = model.accent;
-      const rgb = paletteColour(model.accent) ?? '#ffffff';
-      this.chrome.clear();
-      this.chrome.fillStyle(0x000000, 1);
-      this.chrome.fillRect(0, PANEL_TOP, GAME_WIDTH, HUD_HEIGHT);
-      this.chrome.fillStyle(parseInt(rgb.slice(1), 16), 1);
-      this.chrome.fillRect(0, PANEL_TOP, GAME_WIDTH, 1);
-      this.chrome.fillRect(0, PANEL_TOP + 14, GAME_WIDTH, 1);
+    this.drawChrome(model.accent, progressWidth(model.collected, model.total, GAME_WIDTH));
+
+    // Light the counter up when it goes up, but not on the first frame of a
+    // room, when "going up" only means "was never drawn before".
+    if (this.lastCollected >= 0 && model.collected > this.lastCollected) {
+      this.counterFlashMs = COUNTER_FLASH_MS;
     }
+    this.lastCollected = model.collected;
+    this.counterFlashMs = Math.max(0, this.counterFlashMs - deltaMs);
+
+    if (this.lastLives >= 0 && model.lives > this.lastLives) {
+      this.newLifeBlinkMs = NEW_LIFE_BLINK_MS;
+    }
+    this.lastLives = model.lives;
+    this.newLifeBlinkMs = Math.max(0, this.newLifeBlinkMs - deltaMs);
 
     if (this.message !== null) {
       this.nameLabel.setText(this.message).setColour(this.messageColour);
@@ -160,10 +231,15 @@ export class Hud {
     const collected = String(model.collected).padStart(2, '0');
     const total = String(model.total).padStart(2, '0');
     this.itemsLabel.setText(`ITEMS ${collected}/${total}`);
+    this.itemsLabel.setColour(this.counterFlashMs > 0 ? 'W' : 'Y');
     this.timeLabel.setText(`TIME ${formatDuration(model.elapsedMs)}`);
     this.muteLabel.setText(model.muted ? 'MUTE' : '');
 
-    this.lifeIcons.forEach((icon, index) => icon.setVisible(index < model.lives));
+    const newest = model.lives - 1;
+    const blinkOff = this.newLifeBlinkMs > 0 && Math.floor(this.newLifeBlinkMs / 120) % 2 === 0;
+    this.lifeIcons.forEach((icon, index) =>
+      icon.setVisible(index < model.lives && !(index === newest && blinkOff)),
+    );
     for (const [lock, icon] of this.keyIcons) icon.setVisible(model.keys.has(lock));
   }
 

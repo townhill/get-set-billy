@@ -68,6 +68,17 @@ const EFFECTS = {
     { freq: 900, to: 200, duration: 0.12, gain: 0.5 },
     { freq: 300, to: 1200, duration: 0.16, at: 0.1, gain: 0.5 },
   ],
+  // The long whistle of a fall that has already gone too far. Descending, as
+  // falls do, and long enough to still be going when the floor arrives.
+  plummet: [{ freq: 1400, to: 260, duration: 0.7, wave: 'triangle' as Waveform, gain: 0.55 }],
+  // A spare life: the collect chime, then two notes more, going up.
+  spareLife: [
+    { freq: 523, duration: 0.07 },
+    { freq: 659, duration: 0.07, at: 0.08 },
+    { freq: 784, duration: 0.07, at: 0.16 },
+    { freq: 1047, duration: 0.07, at: 0.24 },
+    { freq: 1319, duration: 0.2, at: 0.32, gain: 0.5 },
+  ],
   // A lever being thrown: a heavy clunk, then whatever it moved settling.
   lever: [
     { freq: 260, to: 150, duration: 0.08, wave: 'square' as Waveform, gain: 0.7 },

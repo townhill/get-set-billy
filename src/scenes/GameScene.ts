@@ -10,20 +10,28 @@ import {
   WORLD,
   isDebugEnabled,
 } from '../config';
-import { ENEMY_SPRITES, ITEM_SPRITES, DOOR_HEIGHT, DOOR_WIDTH } from '../assets/sprites';
-import { ITEM_FLASH_COLOURS, paletteHex } from '../assets/palette';
+import {
+  ENEMY_SPRITES,
+  ITEM_SPRITES,
+  DOOR_HEIGHT,
+  DOOR_WIDTH,
+  VENT_KINDS,
+} from '../assets/sprites';
+import { ITEM_FLASH_COLOURS, LOCK_INKS, type PaletteKey, paletteHex } from '../assets/palette';
 import { type ThemeDef, themeFor } from '../assets/themes';
 import { PixelText } from '../render/PixelText';
-import { buildRoomTexture, keys } from '../render/textures';
-import { Player } from '../objects/Player';
-import { enemyBox, enemyFacing } from '../objects/Enemy';
+import { SHADOW_OFFSET, buildRoomTextures, keys } from '../render/textures';
+import { ParticleField, seededRandom } from '../render/particles';
+import { Player, type PlayerPose } from '../objects/Player';
+import { enemyBox, enemyFacing, enemyIsLethal, ventStage } from '../objects/Enemy';
 import { liftBox } from '../objects/Lift';
 import { ropeEnd, ropePoint } from '../objects/Rope';
-import { boxesOverlap, insetBox, type Box } from '../systems/CollisionSystem';
+import { boxesOverlap, hazardCellUnder, insetBox, type Box } from '../systems/CollisionSystem';
 import { audio } from '../systems/AudioSystem';
 import { input } from '../systems/InputSystem';
 import { SaveSystem } from '../systems/SaveSystem';
 import { GameState, type GameStateSnapshot, type SpawnKey } from '../state/GameState';
+import { type Cause, obituary } from '../state/obituaries';
 import {
   ALL_ROOM_DATA,
   ALL_TELEPORTS,
@@ -33,7 +41,7 @@ import {
   keysHeld,
 } from '../world/RoomManager';
 import type { Room } from '../world/Room';
-import { OPPOSITE, type Direction, type ItemDef } from '../world/roomTypes';
+import { OPPOSITE, type Direction, type EnemyDef, type ItemDef } from '../world/roomTypes';
 import { GATE_ART, LIFT_ART } from '../assets/tileArt';
 import { type LockColour, lockColour, shutterFor } from '../world/tiles';
 import { Hud } from '../ui/Hud';
@@ -63,14 +71,28 @@ interface DynamicTile {
 }
 
 const DEPTH = {
-  room: 0,
+  backdrop: 0,
+  /** Behind the scenery, so a shadow only ever falls on the wall at the back. */
+  shadows: 1,
+  room: 2,
   tiles: 5,
   door: 6,
   items: 10,
   enemies: 20,
   player: 30,
+  particles: 31,
   overlay: 100,
 } as const;
+
+/** The player's colours, for the pieces they go to when something gets them. */
+const PLAYER_INKS: readonly PaletteKey[] = ['M', 'Y', 'C', 'R'];
+
+/** The drawn parts of one vent: its grating, and its jet a cell at a time, top first. */
+interface VentImages {
+  kind: string;
+  grate: Phaser.GameObjects.Image;
+  cells: Phaser.GameObjects.Image[];
+}
 
 export class GameScene extends Phaser.Scene {
   private state!: GameState;
@@ -89,11 +111,22 @@ export class GameScene extends Phaser.Scene {
   /** A gate colour part-way through grinding open, and how long it has been going. */
   private gateOpening: { lock: LockColour; ms: number } | null = null;
 
+  private backdropImage!: Phaser.GameObjects.Image;
   private roomImage!: Phaser.GameObjects.Image;
   private playerImage!: Phaser.GameObjects.Image;
+  /**
+   * Everything that casts a shadow, paired with the silhouette that is its
+   * shadow. The player's lasts the whole game; the rest go with the room.
+   */
+  private playerShadow: Phaser.GameObjects.Image | null = null;
+  private roomShadows: { image: Phaser.GameObjects.Image; shadow: Phaser.GameObjects.Image }[] = [];
+  /** Shadows of the things drawn as lines rather than sprites: ropes and chains. */
+  private lineShadows: Phaser.GameObjects.Graphics | null = null;
   private doorImage: Phaser.GameObjects.Image | null = null;
   private dynamicTiles: DynamicTile[] = [];
-  private enemyImages: Phaser.GameObjects.Image[] = [];
+  /** One per enemy, in the room data's order; null for a vent, which is drawn in parts. */
+  private enemyImages: (Phaser.GameObjects.Image | null)[] = [];
+  private ventImages = new Map<number, VentImages>();
   /** One row of deck segments per lift, since a lift is as wide as it says. */
   private liftImages: Phaser.GameObjects.Image[][] = [];
   private teleportImages: Phaser.GameObjects.Image[] = [];
@@ -107,6 +140,16 @@ export class GameScene extends Phaser.Scene {
   private roomTitleMs = 0;
   /** The gentler collectable flash. Off by default; remembered when turned on. */
   private reducedFlashing = false;
+
+  /** Dust, sparks and debris. Presentation only: nothing in here is read by the rules. */
+  private particles = new ParticleField(seededRandom(Date.now()));
+  private particleGraphics: Phaser.GameObjects.Graphics | null = null;
+  /** Counts down after a real landing, while the player is drawn crouched. */
+  private landSquashMs = 0;
+  /** How long the player has stood still, for the blink. */
+  private idleMs = 0;
+  /** Whether the fall in progress had already gone too far last step, for the whistle. */
+  private wasPlummeting = false;
 
   constructor() {
     super('GameScene');
@@ -122,8 +165,20 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor('#000000');
     input.attach();
 
+    this.backdropImage = this.add.image(0, 0, '__DEFAULT').setOrigin(0, 0).setDepth(DEPTH.backdrop);
     this.roomImage = this.add.image(0, 0, '__DEFAULT').setOrigin(0, 0).setDepth(DEPTH.room);
     this.playerImage = this.add.image(0, 0, '__DEFAULT').setOrigin(0, 0).setDepth(DEPTH.player);
+    this.playerShadow = this.add
+      .image(0, 0, '__DEFAULT')
+      .setOrigin(0, 0)
+      .setDepth(DEPTH.shadows)
+      .setVisible(false);
+    this.lineShadows = this.add.graphics().setDepth(DEPTH.shadows);
+    this.particleGraphics = this.add.graphics().setDepth(DEPTH.particles);
+    this.particles.clear();
+    this.landSquashMs = 0;
+    this.idleMs = 0;
+    this.wasPlummeting = false;
     this.hud = new Hud(this);
     this.map = new MapOverlay(this, DEPTH.overlay);
     this.ropeGraphics = this.add.graphics().setDepth(DEPTH.tiles);
@@ -137,6 +192,7 @@ export class GameScene extends Phaser.Scene {
       originX: 0.5,
       colour: 'W',
       depth: DEPTH.overlay - 1,
+      outline: true,
     });
 
     if (isDebugEnabled()) {
@@ -172,11 +228,15 @@ export class GameScene extends Phaser.Scene {
     // Before anything reads the geometry: an opened gate has to already be air.
     this.room.setKeys(keysHeld(this.state.collectedItems));
     this.gateOpening = null;
+    this.particles.clear();
+    this.landSquashMs = 0;
     this.theme = themeFor(this.room.data.theme);
     this.state.enterRoom(id, spawn);
     this.mode = 'playing';
 
-    this.roomImage.setTexture(buildRoomTexture(this, this.room, this.theme));
+    const textures = buildRoomTextures(this, this.room, this.theme);
+    this.backdropImage.setTexture(textures.backdrop);
+    this.roomImage.setTexture(textures.scenery);
 
     this.buildDynamicTiles();
     this.buildLifts();
@@ -191,6 +251,8 @@ export class GameScene extends Phaser.Scene {
       Object.values(this.room.data.spawns)[0] ?? { x: 8, y: PLAY_HEIGHT - PLAYER.height };
 
     this.player.placeAt(point.x, point.y, options.carryVy ?? 0, options.carryFall ?? 0);
+    // A fatal fall carried down from the room above has already had its whistle.
+    this.wasPlummeting = this.player.fallIsFatal;
     this.renderPlayer();
 
     if (options.announce !== false) audio.playSting(this.theme.sting);
@@ -210,11 +272,56 @@ export class GameScene extends Phaser.Scene {
     this.roomTitleMs = WORLD.roomTitleMs;
   }
 
+  /**
+   * Gives an image a shadow on the back wall, kept in step with it every frame.
+   * Returns the image, so it can wrap the call that made it.
+   */
+  private castShadow(image: Phaser.GameObjects.Image): Phaser.GameObjects.Image {
+    const shadow = this.add
+      .image(image.x + SHADOW_OFFSET, image.y + SHADOW_OFFSET, '__DEFAULT')
+      .setOrigin(image.originX, image.originY)
+      .setDepth(DEPTH.shadows);
+    this.roomShadows.push({ image, shadow });
+    return image;
+  }
+
+  /** Takes an image's shadow away with it, for something that leaves before the room does. */
+  private dropShadow(image: Phaser.GameObjects.Image): void {
+    this.roomShadows = this.roomShadows.filter((pair) => {
+      if (pair.image !== image) return true;
+      pair.shadow.destroy();
+      return false;
+    });
+  }
+
+  /** Moves, re-shapes and shows or hides each shadow to match what casts it. */
+  private renderShadows(): void {
+    const follow = (image: Phaser.GameObjects.Image, shadow: Phaser.GameObjects.Image): void => {
+      const key = keys.shadow(image.texture.key);
+      if (!this.textures.exists(key)) {
+        shadow.setVisible(false);
+        return;
+      }
+      if (shadow.texture.key !== key) shadow.setTexture(key);
+      shadow.setPosition(image.x + SHADOW_OFFSET, image.y + SHADOW_OFFSET);
+      shadow.setVisible(image.visible);
+    };
+    for (const { image, shadow } of this.roomShadows) follow(image, shadow);
+    if (this.playerShadow !== null) follow(this.playerImage, this.playerShadow);
+  }
+
   private clearRoomObjects(): void {
+    for (const { shadow } of this.roomShadows) shadow.destroy();
+    this.roomShadows = [];
     for (const tile of this.dynamicTiles) tile.image.destroy();
     this.dynamicTiles = [];
-    for (const image of this.enemyImages) image.destroy();
+    for (const image of this.enemyImages) image?.destroy();
     this.enemyImages = [];
+    for (const vent of this.ventImages.values()) {
+      vent.grate.destroy();
+      for (const cell of vent.cells) cell.destroy();
+    }
+    this.ventImages.clear();
     for (const deck of this.liftImages) for (const image of deck) image.destroy();
     this.liftImages = [];
     for (const image of this.teleportImages) image.destroy();
@@ -259,6 +366,8 @@ export class GameScene extends Phaser.Scene {
         .image(col * TILE_SIZE, row * TILE_SIZE, key)
         .setOrigin(0, 0)
         .setDepth(DEPTH.tiles);
+      // Liquid sits in a pit, where its shadow would only fall on the pit.
+      if (char !== '~') this.castShadow(image);
       this.dynamicTiles.push({ image, col, row, char });
     });
   }
@@ -269,7 +378,9 @@ export class GameScene extends Phaser.Scene {
       const segments = Math.max(1, Math.ceil(def.width / TILE_SIZE));
       const deck: Phaser.GameObjects.Image[] = [];
       for (let i = 0; i < segments; i++) {
-        deck.push(this.add.image(0, 0, texture).setOrigin(0, 0).setDepth(DEPTH.tiles));
+        deck.push(
+          this.castShadow(this.add.image(0, 0, texture).setOrigin(0, 0).setDepth(DEPTH.tiles)),
+        );
       }
       this.liftImages.push(deck);
     }
@@ -281,7 +392,7 @@ export class GameScene extends Phaser.Scene {
         .image(pad.x, pad.y, keys.teleport(0))
         .setOrigin(0, 0)
         .setDepth(DEPTH.tiles);
-      this.teleportImages.push(image);
+      this.teleportImages.push(this.castShadow(image));
     }
   }
 
@@ -289,10 +400,9 @@ export class GameScene extends Phaser.Scene {
     const door = this.room.data.door;
     if (!door) return;
     const open = this.state.hasEverything(TOTAL_ITEMS);
-    this.doorImage = this.add
-      .image(door.x, door.y, keys.door(open))
-      .setOrigin(0, 0)
-      .setDepth(DEPTH.door);
+    this.doorImage = this.castShadow(
+      this.add.image(door.x, door.y, keys.door(open)).setOrigin(0, 0).setDepth(DEPTH.door),
+    );
   }
 
   private buildItems(): void {
@@ -301,19 +411,47 @@ export class GameScene extends Phaser.Scene {
       const lock = KEY_ITEMS.get(item.id);
       const texture = lock === undefined ? keys.item(item.sprite, 0) : keys.keyItem(lock, 0);
       const image = this.add.image(item.x, item.y, texture).setOrigin(0, 0).setDepth(DEPTH.items);
-      this.itemImages.set(item.id, image);
+      this.itemImages.set(item.id, this.castShadow(image));
     }
   }
 
   private buildEnemies(): void {
-    for (const def of this.room.data.enemies ?? []) {
+    (this.room.data.enemies ?? []).forEach((def, index) => {
+      if (def.type === 'vent') {
+        this.buildVent(def, index);
+        this.enemyImages.push(null);
+        return;
+      }
       const name = def.sprite in ENEMY_SPRITES ? def.sprite : 'bowler';
       const image = this.add
         .image(0, 0, keys.enemy(name, 0, 1))
         .setOrigin(0, 0)
         .setDepth(DEPTH.enemies);
-      this.enemyImages.push(image);
-    }
+      this.enemyImages.push(this.castShadow(image));
+    });
+  }
+
+  /**
+   * A vent is drawn as its grating, which is always there, and its jet, one
+   * cell at a time, which is only there while it sputters or fires.
+   */
+  private buildVent(def: Extract<EnemyDef, { type: 'vent' }>, index: number): void {
+    const kind = def.sprite in VENT_KINDS ? def.sprite : 'steam';
+    const bottom = def.y + (def.cells - 1) * TILE_SIZE;
+    const cells = Array.from({ length: def.cells }, (_unused, cell) =>
+      this.castShadow(
+        this.add
+          .image(def.x, def.y + cell * TILE_SIZE, keys.enemy(kind, 0, 1))
+          .setOrigin(0, 0)
+          .setDepth(DEPTH.enemies)
+          .setVisible(false),
+      ),
+    );
+    const grate = this.add
+      .image(def.x, bottom, keys.vent(kind, 'grate'))
+      .setOrigin(0, 0)
+      .setDepth(DEPTH.tiles);
+    this.ventImages.set(index, { kind, grate, cells });
   }
 
   // -------------------------------------------------------------------------
@@ -345,6 +483,7 @@ export class GameScene extends Phaser.Scene {
       if (this.roomTitleMs === 0) this.roomTitle?.setText('');
     }
 
+    this.landSquashMs = Math.max(0, this.landSquashMs - deltaMs);
     this.lockedNoiseCooldownMs = Math.max(0, this.lockedNoiseCooldownMs - deltaMs);
     this.gateNagCooldownMs = Math.max(0, this.gateNagCooldownMs - deltaMs);
 
@@ -383,8 +522,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (this.mode === 'playing' && input.justPressed('restartRoom')) {
-      this.hud.say('GIVING UP ON THIS ROOM', 1200, 'R');
-      this.die();
+      this.die({ kind: 'gave-up' });
     }
   }
 
@@ -395,7 +533,20 @@ export class GameScene extends Phaser.Scene {
     const result = this.player.step(input.playerInput(), stepMs / 1000, this.room);
 
     if (result.floorsCollapsed > 0) audio.play('crumble');
-    if (result.jumped) audio.play('jump');
+    if (result.jumped) {
+      audio.play('jump');
+      this.kickUpDust(2, [12, 32]);
+    }
+    if (result.landed && result.died === null && result.landedFrom >= WORLD.landThudDistance) {
+      audio.play('land');
+      this.landSquashMs = WORLD.landSquashMs;
+      this.kickUpDust(3, [20, 55]);
+    }
+
+    // The moment a fall becomes one you will not walk away from, say so.
+    const plummeting = this.player.fallIsFatal;
+    if (plummeting && !this.wasPlummeting) audio.play('plummet');
+    this.wasPlummeting = plummeting;
     if (result.flippedSwitch) {
       audio.play('lever');
       this.hud.say(
@@ -416,14 +567,15 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (result.died !== null) {
-      this.die();
+      this.die(this.causeOf(result.died));
       return false;
     }
 
     const hitbox = insetBox(this.player.box, PLAYER.hazardInset);
 
-    if (this.touchesEnemy(hitbox)) {
-      this.die();
+    const culprit = this.touchesEnemy(hitbox);
+    if (culprit !== null) {
+      this.die({ kind: 'enemy', sprite: culprit.sprite });
       return false;
     }
 
@@ -433,15 +585,24 @@ export class GameScene extends Phaser.Scene {
     return false;
   }
 
-  private touchesEnemy(hitbox: Box): boolean {
+  /** The resident the player is touching, if touching it is fatal right now. */
+  private touchesEnemy(hitbox: Box): EnemyDef | null {
     const seconds = this.room.seconds;
     const defs = this.room.data.enemies ?? [];
     for (const def of defs) {
+      if (!enemyIsLethal(def, seconds)) continue;
       const sprite = ENEMY_SPRITES[def.sprite] ?? ENEMY_SPRITES.bowler;
       const box = enemyBox(def, seconds, sprite);
-      if (boxesOverlap(hitbox, insetBox(box, 1))) return true;
+      if (boxesOverlap(hitbox, insetBox(box, 1))) return def;
     }
-    return false;
+    return null;
+  }
+
+  /** Turns the movement model's reason for a death into something the panel can say. */
+  private causeOf(died: 'hazard' | 'fall' | 'enemy'): Cause {
+    if (died === 'fall') return { kind: 'fall' };
+    const cell = hazardCellUnder(insetBox(this.player.box, PLAYER.hazardInset), this.room);
+    return { kind: 'hazard', tile: cell === null ? null : this.room.charAt(cell.col, cell.row) };
   }
 
   private collectItems(hitbox: Box): void {
@@ -451,21 +612,41 @@ export class GameScene extends Phaser.Scene {
       if (!boxesOverlap(hitbox, box)) continue;
 
       this.state.collect(item.id);
-      this.itemImages.get(item.id)?.destroy();
+      const taken = this.itemImages.get(item.id);
+      if (taken !== undefined) this.dropShadow(taken);
+      taken?.destroy();
       this.itemImages.delete(item.id);
+      const spare = this.state.awardSpareLife();
       this.autosave();
 
-      if (item.opens !== undefined) {
-        this.openGates(item.opens);
+      const lock = item.opens;
+      this.particles.burst({
+        x: item.x + TILE_SIZE / 2,
+        y: item.y + TILE_SIZE / 2,
+        count: 16,
+        colours: lock === undefined ? ITEM_FLASH_COLOURS : LOCK_INKS[lock],
+        speed: [30, 85],
+        gravity: 90,
+        lifeMs: [300, 560],
+      });
+
+      if (lock !== undefined) {
+        this.openGates(lock);
       } else {
         audio.play('collect');
       }
 
       if (this.state.hasEverything(TOTAL_ITEMS)) {
         this.onEverythingCollected();
-      } else if (item.opens === undefined) {
+      } else if (lock === undefined) {
         const left = TOTAL_ITEMS - this.state.collectedCount;
         this.hud.say(`${left} STILL MISSING`, 1100, 'G');
+      }
+
+      // After whatever the pickup itself had to say, so a key's news is not lost.
+      if (spare) {
+        this.time.delayedCall(420, () => audio.play('spareLife'));
+        this.hud.sayNext('A SPARE LIFE. DO NOT WASTE IT', 1600, 'M');
       }
     }
   }
@@ -474,6 +655,19 @@ export class GameScene extends Phaser.Scene {
   private openGates(lock: LockColour): void {
     this.room.setKeys(keysHeld(this.state.collectedItems));
     this.gateOpening = { lock, ms: 0 };
+    this.room.forEachCell((col, row, char) => {
+      if (lockColour(char) !== lock) return;
+      this.particles.burst({
+        x: col * TILE_SIZE + TILE_SIZE / 2,
+        y: row * TILE_SIZE + TILE_SIZE / 2,
+        count: 4,
+        colours: LOCK_INKS[lock],
+        speed: [20, 60],
+        gravity: 160,
+        lifeMs: [250, 520],
+        scatter: 3,
+      });
+    });
     audio.play('unlock');
     this.hud.say(
       `THE ${lock.toUpperCase()} KEY! EVERY ${lock.toUpperCase()} GATE IS OPEN`,
@@ -516,6 +710,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onEverythingCollected(): void {
+    const { x, y } = this.playerCentre();
+    this.particles.burst({
+      x,
+      y,
+      count: 48,
+      colours: ITEM_FLASH_COLOURS,
+      speed: [40, 130],
+      gravity: 120,
+      lifeMs: [500, 1000],
+    });
     const doorRoom = this.rooms.findDoorRoom();
     this.hud.say(`ALL FOUND! GO TO ${(doorRoom?.name ?? 'THE DOOR').toUpperCase()}`, 3000, 'Y');
     this.doorImage?.setTexture(keys.door(true));
@@ -564,15 +768,70 @@ export class GameScene extends Phaser.Scene {
 
     audio.play('teleport');
     this.loadRoom(to.room, this.state.entrySpawn, { announce: false, at: { x: to.x, y: to.y } });
+    this.materialise(['M', 'W']);
     this.hud.say('OUT THE OTHER SIDE', 1400, 'M');
   }
 
-  private die(): void {
+  private die(cause: Cause): void {
     if (this.mode !== 'playing') return;
     this.mode = 'dying';
     this.deathTimerMs = WORLD.deathDurationMs;
     audio.play('death');
     this.cameras.main.shake(220, 0.006);
+    this.hud.say(obituary(cause), WORLD.deathDurationMs, 'R');
+
+    const { x, y } = this.playerCentre();
+    this.particles.burst({
+      x,
+      y,
+      count: 26,
+      colours: PLAYER_INKS,
+      speed: [40, 125],
+      gravity: 280,
+      lifeMs: [450, 850],
+      scatter: 3,
+    });
+    this.particles.burst({
+      x,
+      y,
+      count: 6,
+      colours: PLAYER_INKS,
+      speed: [30, 80],
+      angle: [Math.PI * 1.15, Math.PI * 1.85],
+      gravity: 320,
+      lifeMs: [600, 850],
+      size: 2,
+    });
+  }
+
+  /** Where the middle of the player is, for effects centred on them. */
+  private playerCentre(): { x: number; y: number } {
+    return { x: this.player.x + PLAYER.width / 2, y: this.player.y + PLAYER.height / 2 };
+  }
+
+  /** Specks drawn in to wherever the player has just appeared. */
+  private materialise(colours: readonly PaletteKey[]): void {
+    const { x, y } = this.playerCentre();
+    this.particles.converge({ x, y, count: 18, radius: 16, colours, durationMs: 260 });
+  }
+
+  /** A puff of dust from the player's feet, both ways along the floor. */
+  private kickUpDust(each: number, speed: readonly [number, number]): void {
+    const x = this.player.x + PLAYER.width / 2;
+    const y = this.player.y + PLAYER.height - 1;
+    const puff = { y, count: each, colours: ['w', 'W'] as PaletteKey[], speed, gravity: 70 };
+    this.particles.burst({
+      ...puff,
+      x: x - 2,
+      angle: [Math.PI * 1.02, Math.PI * 1.25],
+      lifeMs: [160, 320],
+    });
+    this.particles.burst({
+      ...puff,
+      x: x + 2,
+      angle: [Math.PI * 1.75, Math.PI * 1.98],
+      lifeMs: [160, 320],
+    });
   }
 
   private finishDying(): void {
@@ -595,7 +854,12 @@ export class GameScene extends Phaser.Scene {
 
     this.autosave();
     this.loadRoom(this.state.currentRoom, this.state.entrySpawn, { announce: false });
-    this.hud.say(`${this.state.lives} LIVES LEFT`, 1200, 'R');
+    this.materialise(['W', 'C', 'Y']);
+    this.hud.say(
+      this.state.lives === 1 ? 'LAST LIFE' : `${this.state.lives} LIVES LEFT`,
+      1200,
+      'R',
+    );
   }
 
   private win(): void {
@@ -630,13 +894,16 @@ export class GameScene extends Phaser.Scene {
   // -------------------------------------------------------------------------
 
   private render(deltaMs: number): void {
-    this.renderPlayer();
+    this.lineShadows?.clear().fillStyle(0x000000, 1);
+    this.renderPlayer(deltaMs);
     this.renderLifts();
     this.renderRopes();
     this.renderTeleports();
-    this.renderEnemies();
+    this.renderEnemies(deltaMs);
     this.renderItems();
-    this.renderDynamicTiles();
+    this.renderDynamicTiles(deltaMs);
+    this.renderShadows();
+    this.renderParticles(deltaMs);
 
     this.hud.update(
       {
@@ -674,14 +941,44 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  private renderPlayer(): void {
-    const pose = this.mode === 'dying' ? 'dead' : this.player.pose;
-    const frame =
-      this.mode === 'dying'
-        ? Math.floor((WORLD.deathDurationMs - this.deathTimerMs) / 120) % 2
-        : pose === 'walk'
-          ? this.player.animFrame
-          : 0;
+  /**
+   * Which drawing of the player to show, and which frame of it.
+   *
+   * The movement model's pose, dressed up with the few things that are purely
+   * for show: a crouch for a moment after a real landing, and a blink now and
+   * then while standing about.
+   */
+  private presentPlayer(deltaMs: number): { pose: PlayerPose | 'dead' | 'land'; frame: number } {
+    if (this.mode === 'dying') {
+      return {
+        pose: 'dead',
+        frame: Math.floor((WORLD.deathDurationMs - this.deathTimerMs) / 120) % 2,
+      };
+    }
+
+    const pose = this.player.pose;
+    if (pose === 'stand' && this.mode === 'playing') this.idleMs += deltaMs;
+    else if (pose !== 'stand') this.idleMs = 0;
+
+    if ((pose === 'stand' || pose === 'walk') && this.landSquashMs > 0) {
+      return { pose: 'land', frame: 0 };
+    }
+    switch (pose) {
+      case 'walk':
+        return { pose, frame: this.player.animFrame };
+      case 'plummet':
+        return { pose, frame: Math.floor(this.room.elapsedMs / 90) % 2 };
+      case 'stand': {
+        const blinking = this.idleMs % WORLD.blinkEveryMs > WORLD.blinkEveryMs - WORLD.blinkForMs;
+        return { pose, frame: blinking ? 1 : 0 };
+      }
+      default:
+        return { pose, frame: 0 };
+    }
+  }
+
+  private renderPlayer(deltaMs = 0): void {
+    const { pose, frame } = this.presentPlayer(deltaMs);
 
     this.playerImage.setTexture(keys.player(pose, this.player.facing, frame));
     this.playerImage.setPosition(Math.round(this.player.x), Math.round(this.player.y));
@@ -705,6 +1002,7 @@ export class GameScene extends Phaser.Scene {
     const seconds = this.room.seconds;
     const theme = this.room.data.theme;
     const chains = this.liftGraphics;
+    const shade = this.lineShadows;
     chains?.clear();
 
     (this.room.data.lifts ?? []).forEach((def, index) => {
@@ -720,6 +1018,7 @@ export class GameScene extends Phaser.Scene {
         const middle = left + Math.floor(def.width / 2);
         for (let y = top - 3; y >= 0; y -= 3) {
           chains.fillRect(middle, y, 1, 2);
+          shade?.fillRect(middle + SHADOW_OFFSET, y + SHADOW_OFFSET, 1, 2);
         }
       }
 
@@ -740,6 +1039,7 @@ export class GameScene extends Phaser.Scene {
    */
   private renderRopes(): void {
     const g = this.ropeGraphics;
+    const shade = this.lineShadows;
     if (g === null) return;
     g.clear();
 
@@ -753,10 +1053,17 @@ export class GameScene extends Phaser.Scene {
       for (let along = 2; along <= def.length; along += 2) {
         const at = ropePoint(def, seconds, along);
         g.fillRect(Math.round(at.x), Math.round(at.y), 1, 1);
+        shade?.fillRect(Math.round(at.x) + SHADOW_OFFSET, Math.round(at.y) + SHADOW_OFFSET, 1, 1);
       }
       const knot = ropeEnd(def, seconds);
       g.fillStyle(paletteHex('Y'), 1);
       g.fillRect(Math.round(knot.x) - 1, Math.round(knot.y) - 1, 3, 3);
+      shade?.fillRect(
+        Math.round(knot.x) - 1 + SHADOW_OFFSET,
+        Math.round(knot.y) - 1 + SHADOW_OFFSET,
+        3,
+        3,
+      );
       g.fillStyle(paletteHex('y'), 1);
     }
   }
@@ -766,10 +1073,14 @@ export class GameScene extends Phaser.Scene {
     for (const image of this.teleportImages) image.setTexture(keys.teleport(frame));
   }
 
-  private renderEnemies(): void {
+  private renderEnemies(deltaMs: number): void {
     const seconds = this.room.seconds;
     const defs = this.room.data.enemies ?? [];
     defs.forEach((def, index) => {
+      if (def.type === 'vent') {
+        this.renderVent(def, index, seconds, deltaMs);
+        return;
+      }
       const image = this.enemyImages[index];
       if (!image) return;
       const name = def.sprite in ENEMY_SPRITES ? def.sprite : 'bowler';
@@ -779,6 +1090,53 @@ export class GameScene extends Phaser.Scene {
       image.setTexture(keys.enemy(name, frame, enemyFacing(def, seconds, sprite)));
       image.setPosition(Math.round(box.x), Math.round(box.y));
     });
+  }
+
+  /**
+   * Quiet, it is a grating. Sputtering, a wisp or two comes off it. Firing, the
+   * whole column is filled, ragged at the top and throwing off specks.
+   */
+  private renderVent(
+    def: Extract<EnemyDef, { type: 'vent' }>,
+    index: number,
+    seconds: number,
+    deltaMs: number,
+  ): void {
+    const parts = this.ventImages.get(index);
+    if (parts === undefined) return;
+    const stage = ventStage(def, seconds);
+    const frame = Math.floor(this.room.elapsedMs / 80) % 2;
+    const last = parts.cells.length - 1;
+
+    parts.cells.forEach((image, cell) => {
+      if (stage === 'firing') {
+        const tip = cell === 0 && last > 0;
+        image.setTexture(
+          tip ? keys.vent(parts.kind, 'tip', frame) : keys.enemy(parts.kind, frame, 1),
+        );
+        image.setVisible(true);
+      } else if (stage === 'warning' && cell === last) {
+        image.setTexture(keys.vent(parts.kind, 'warn', frame)).setVisible(true);
+      } else {
+        image.setVisible(false);
+      }
+    });
+
+    // About twenty specks a second, however fast the display is refreshing.
+    if (stage === 'firing' && this.mode !== 'paused' && this.particles.chance() < deltaMs * 0.02) {
+      const ink = VENT_KINDS[parts.kind] ?? VENT_KINDS.steam;
+      this.particles.burst({
+        x: def.x + TILE_SIZE / 2,
+        y: def.y + 2,
+        count: 1,
+        colours: [ink.hot as PaletteKey, ink.edge as PaletteKey],
+        speed: [18, 40],
+        angle: [Math.PI * 1.3, Math.PI * 1.7],
+        gravity: -20,
+        lifeMs: [180, 360],
+        scatter: 2,
+      });
+    }
   }
 
   private renderItems(): void {
@@ -798,12 +1156,29 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private renderDynamicTiles(): void {
+  private renderDynamicTiles(deltaMs: number): void {
     const themeName = this.room.data.theme;
+    const bubbling = this.mode !== 'paused';
     for (const tile of this.dynamicTiles) {
       switch (tile.char) {
         case '~':
           tile.image.setTexture(keys.liquid(themeName, Math.floor(this.room.elapsedMs / 280) % 2));
+          // Now and then something surfaces. Only from the top of a pool.
+          if (
+            bubbling &&
+            this.room.rawCharAt(tile.col, tile.row - 1) !== '~' &&
+            this.particles.chance() < deltaMs * 0.0006
+          ) {
+            this.particles.burst({
+              x: tile.col * TILE_SIZE + 1 + this.particles.chance() * 6,
+              y: tile.row * TILE_SIZE + 1,
+              count: 1,
+              colours: [this.theme.liquidShade],
+              speed: [8, 16],
+              angle: [Math.PI * 1.45, Math.PI * 1.55],
+              lifeMs: [260, 520],
+            });
+          }
           break;
         case '*':
           tile.image.setTexture(keys.nasty(themeName, Math.floor(this.room.elapsedMs / 110) % 2));
@@ -818,6 +1193,20 @@ export class GameScene extends Phaser.Scene {
         case '%': {
           const stage = this.room.crumbleStage(tile.col, tile.row);
           if (stage < 0) {
+            // The moment it goes, what is left of it goes downwards.
+            if (tile.image.visible) {
+              this.particles.burst({
+                x: tile.col * TILE_SIZE + TILE_SIZE / 2,
+                y: tile.row * TILE_SIZE + 1,
+                count: 6,
+                colours: [this.theme.crumbleInk, this.theme.crumbleShade],
+                speed: [10, 40],
+                angle: [Math.PI * 0.25, Math.PI * 0.75],
+                gravity: 420,
+                lifeMs: [300, 600],
+                scatter: 3,
+              });
+            }
             tile.image.setVisible(false);
           } else {
             tile.image.setVisible(true);
@@ -852,6 +1241,18 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** Every speck in one Graphics, a filled pixel (or two) apiece. Frozen while paused. */
+  private renderParticles(deltaMs: number): void {
+    const g = this.particleGraphics;
+    if (g === null) return;
+    if (this.mode !== 'paused') this.particles.step(deltaMs);
+    g.clear();
+    this.particles.forEach((speck) => {
+      g.fillStyle(paletteHex(speck.colour), 1);
+      g.fillRect(Math.round(speck.x), Math.round(speck.y), speck.size, speck.size);
+    });
+  }
+
   /**
    * Pausing shows the map. There is nothing else worth looking at while the
    * game is stopped, and it is the only moment the player has to think.
@@ -875,6 +1276,13 @@ export class GameScene extends Phaser.Scene {
     this.ropeGraphics = null;
     this.liftGraphics?.destroy();
     this.liftGraphics = null;
+    this.lineShadows?.destroy();
+    this.lineShadows = null;
+    this.particleGraphics?.destroy();
+    this.particleGraphics = null;
+    this.particles.clear();
+    this.playerShadow?.destroy();
+    this.playerShadow = null;
     this.roomTitle?.destroy();
     this.roomTitle = null;
     this.hidePauseOverlay();

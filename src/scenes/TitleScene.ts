@@ -1,10 +1,12 @@
 import Phaser from 'phaser';
 import { GAME_WIDTH, PLAY_HEIGHT, TILE_SIZE } from '../config';
-import { LEDGE_ART } from '../assets/tileArt';
+import { DECOR_ART, LEDGE_ART } from '../assets/tileArt';
+import { GLYPH_ADVANCE } from '../assets/font';
+import { backdropFor } from '../assets/backdrops';
 import { PixelText } from '../render/PixelText';
 import { keys } from '../render/textures';
-import { artToCanvas, themedResolver } from '../render/pixels';
-import { PALETTE } from '../assets/palette';
+import { artToCanvas, context2d, createCanvas, paintField, themedResolver } from '../render/pixels';
+import { PALETTE, type PaletteKey } from '../assets/palette';
 import { audio } from '../systems/AudioSystem';
 import { input, keyLabel } from '../systems/InputSystem';
 import { SaveSystem } from '../systems/SaveSystem';
@@ -17,8 +19,33 @@ import { type GameStateSnapshot, formatDuration } from '../state/GameState';
  */
 
 const FLOOR_KEY = 'title-floor';
+const SKY_KEY = 'title-sky';
+const STAR_KEY = 'title-star';
 const FLOOR_Y = 132;
-const MENU_Y = 92;
+const MENU_Y = 88;
+const MENU_STEP = 10;
+/** Under the floor, where the procession cannot walk through it. */
+const BEST_Y = FLOOR_Y + 14;
+
+/** A few stars over the house, which come and go. Positions in logical pixels. */
+const STARS: readonly { x: number; y: number; every: number }[] = [
+  { x: 14, y: 10, every: 2.3 },
+  { x: 232, y: 6, every: 3.1 },
+  { x: 36, y: 50, every: 2.7 },
+  { x: 214, y: 44, every: 1.9 },
+  { x: 8, y: 80, every: 3.7 },
+  { x: 240, y: 76, every: 2.9 },
+];
+
+/** One word of the title, drawn a letter at a time so the letters can move. */
+interface TitleWord {
+  letters: { face: PixelText; shadow: PixelText; x: number }[];
+  y: number;
+  colour: PaletteKey;
+}
+
+/** Big letters are this many times the size of the ordinary ones. */
+const TITLE_SCALE = 3;
 
 export class TitleScene extends Phaser.Scene {
   private saved: GameStateSnapshot | null = null;
@@ -30,6 +57,10 @@ export class TitleScene extends Phaser.Scene {
   private chaser!: Phaser.GameObjects.Image;
   private elapsed = 0;
   private tunePlayed = false;
+  private words: TitleWord[] = [];
+  /** The gentler-flashing setting, which also keeps the glint off the title. */
+  private gentle = false;
+  private stars: Phaser.GameObjects.Image[] = [];
 
   constructor() {
     super('TitleScene');
@@ -39,10 +70,12 @@ export class TitleScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor('#000000');
     input.attach();
     this.saved = SaveSystem.load();
+    this.gentle = SaveSystem.loadSettings().reducedFlashing;
     this.elapsed = 0;
     this.tunePlayed = false;
     this.selected = 0;
 
+    this.drawSky();
     this.drawTitle();
     this.drawFloor();
     this.buildMenu();
@@ -52,34 +85,73 @@ export class TitleScene extends Phaser.Scene {
     this.chaser = this.add.image(8, FLOOR_Y - 8, keys.enemy('bowler', 0, 1)).setOrigin(0, 0);
   }
 
-  private drawTitle(): void {
-    const big = new PixelText(this, {
-      x: GAME_WIDTH / 2,
-      y: 14,
-      maxChars: 8,
-      originX: 0.5,
-      colour: 'Y',
-      scale: 3,
-    });
-    big.setText('PECULIAR');
+  /** A night sky down to the floor the procession walks along, and a few stars in it. */
+  private drawSky(): void {
+    if (!this.textures.exists(SKY_KEY)) {
+      const canvas = createCanvas(GAME_WIDTH, FLOOR_Y);
+      const sky = backdropFor('sky');
+      const inks: Record<string, string | null> = { '1': PALETTE.n, '2': PALETTE.a, '.': null };
+      // Stretched to fit, so it lightens towards the floor rather than stopping short of it.
+      const stretch = PLAY_HEIGHT / FLOOR_Y;
+      paintField(
+        context2d(canvas),
+        GAME_WIDTH,
+        FLOOR_Y,
+        (x, y) => inks[sky(x, Math.floor(y * stretch))] ?? null,
+        '#000000',
+      );
+      this.textures.addCanvas(SKY_KEY, canvas);
+    }
+    if (!this.textures.exists(STAR_KEY)) {
+      this.textures.addCanvas(
+        STAR_KEY,
+        artToCanvas(DECOR_ART.star, themedResolver({ '1': '#ffe040' })),
+      );
+    }
+    this.add.image(0, 0, SKY_KEY).setOrigin(0, 0);
+    this.stars = STARS.map((star) => this.add.image(star.x, star.y, STAR_KEY).setOrigin(0, 0));
+  }
 
-    const small = new PixelText(this, {
+  /**
+   * THE PECULIAR HOUSE, in three lines: a small THE, then the two big words a
+   * letter at a time, each with a drop shadow, so that they can bob.
+   */
+  private buildWord(text: string, y: number, colour: PaletteKey, shade: PaletteKey): TitleWord {
+    const advance = GLYPH_ADVANCE * TITLE_SCALE;
+    const width = text.length * advance - TITLE_SCALE;
+    const left = Math.round(GAME_WIDTH / 2 - width / 2);
+    const letters = [...text].map((char, index) => {
+      const x = left + index * advance;
+      const letter = (ink: PaletteKey): PixelText =>
+        new PixelText(this, { x, y, maxChars: 1, colour: ink, scale: TITLE_SCALE }).setText(char);
+      const shadow = letter(shade);
+      return { face: letter(colour), shadow, x };
+    });
+    return { letters, y, colour };
+  }
+
+  private drawTitle(): void {
+    const the = new PixelText(this, {
       x: GAME_WIDTH / 2,
-      y: 40,
-      maxChars: 12,
+      y: 4,
+      maxChars: 3,
       originX: 0.5,
       colour: 'C',
       scale: 2,
+      outline: true,
     });
-    small.setText('THE HOUSE');
+    the.setText('THE');
+
+    this.words = [this.buildWord('PECULIAR', 19, 'Y', 'r'), this.buildWord('HOUSE', 42, 'M', 'm')];
 
     const tagline = new PixelText(this, {
       x: GAME_WIDTH / 2,
-      y: 62,
+      y: 67,
       maxChars: 40,
       lines: 2,
       originX: 0.5,
       colour: 'W',
+      outline: true,
     });
     tagline.setText([
       `${TOTAL_ITEMS} THINGS ARE MISSING. SO ARE YOU.`,
@@ -129,7 +201,7 @@ export class TitleScene extends Phaser.Scene {
     if (best !== null) {
       const label = new PixelText(this, {
         x: GAME_WIDTH / 2,
-        y: MENU_Y + this.options.length * 11 + 4,
+        y: BEST_Y,
         maxChars: 34,
         originX: 0.5,
         colour: 'Y',
@@ -140,7 +212,7 @@ export class TitleScene extends Phaser.Scene {
     this.menuLabels = this.options.map((option, index) => {
       const label = new PixelText(this, {
         x: GAME_WIDTH / 2,
-        y: MENU_Y + index * 11,
+        y: MENU_Y + index * MENU_STEP,
         maxChars: option.label.length + 4,
         originX: 0.5,
         colour: 'W',
@@ -210,7 +282,34 @@ export class TitleScene extends Phaser.Scene {
     });
 
     this.animateProcession();
+    this.animateTitle();
     input.endFrame();
+  }
+
+  /**
+   * The big letters bob in a slow wave, a glint runs along them every few
+   * seconds, and the stars come and go. Nothing flashes quickly: this is the
+   * screen people leave running.
+   */
+  private animateTitle(): void {
+    const seconds = this.elapsed / 1000;
+    let offset = 0;
+    for (const word of this.words) {
+      // One letter in the word catches the light at a time, then none for a while.
+      const glintAt = Math.floor(((seconds * 9) % 36) - offset);
+      word.letters.forEach((letter, index) => {
+        const lift = Math.round(Math.sin(seconds * 2.4 - (index + offset) * 0.55) * 1.5);
+        const y = word.y + lift;
+        letter.face.image.setY(y);
+        letter.shadow.image.setPosition(letter.x + 2, y + 2);
+        letter.face.setColour(index === glintAt && !this.gentle ? 'W' : word.colour);
+      });
+      offset += word.letters.length;
+    }
+
+    STARS.forEach((star, index) => {
+      this.stars[index]?.setVisible((seconds / star.every) % 1 < 0.8);
+    });
   }
 
   private move(step: number): void {

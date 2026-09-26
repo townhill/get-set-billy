@@ -96,6 +96,17 @@
       "to": 200,
       "speed": 80,
       "phase": 0.6
+    },
+    {
+      "type": "vent",
+      "id": "lab-steam",
+      "sprite": "steam",
+      "x": 128,
+      "y": 136,
+      "cells": 2,
+      "period": 2,
+      "on": 0.7,
+      "phase": 0.5
     }
   ],
   "items": [

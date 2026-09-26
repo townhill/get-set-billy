@@ -237,6 +237,16 @@ export function moveBox(box: Box, dx: number, dy: number, grid: TileGrid): MoveR
 
 /** True when any hazard sub-rectangle overlaps the box. */
 export function overlapsHazard(box: Box, grid: TileGrid): boolean {
+  return hazardCellUnder(box, grid) !== null;
+}
+
+/**
+ * The first hazardous cell a box is touching, or null.
+ *
+ * The same test as `overlapsHazard`, for when it matters which hazard it was —
+ * which it does to the status panel, when it has to say what killed you.
+ */
+export function hazardCellUnder(box: Box, grid: TileGrid): { col: number; row: number } | null {
   const [c0, c1] = colRange(box);
   const [r0, r1] = rowRange(box);
   for (let row = r0; row <= r1; row++) {
@@ -251,11 +261,11 @@ export function overlapsHazard(box: Box, grid: TileGrid): boolean {
         box.y < hy + hazard.h &&
         box.y + box.height > hy
       ) {
-        return true;
+        return { col, row };
       }
     }
   }
-  return false;
+  return null;
 }
 
 /** The column indices of the cells directly beneath a box standing on `groundRow`. */

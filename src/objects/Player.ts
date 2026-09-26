@@ -58,6 +58,8 @@ export interface StepResult {
   died: DeathCause | null;
   /** True on the step the player touched down. */
   landed: boolean;
+  /** How far the player had fallen when they touched down; zero on any other step. */
+  landedFrom: number;
   /** True on the step a jump started. */
   jumped: boolean;
   /** How many crumbling floors finished collapsing this step. */
@@ -70,7 +72,7 @@ export interface StepResult {
   teleported: string | null;
 }
 
-export type PlayerPose = 'stand' | 'walk' | 'jump' | 'fall' | 'hang';
+export type PlayerPose = 'stand' | 'walk' | 'jump' | 'fall' | 'plummet' | 'hang';
 
 export class Player {
   x = 0;
@@ -106,8 +108,22 @@ export class Player {
 
   get pose(): PlayerPose {
     if (this.ropeGrip !== null) return 'hang';
-    if (!this.onGround) return this.vy < 0 ? 'jump' : 'fall';
+    if (!this.onGround) {
+      if (this.vy < 0) return 'jump';
+      return this.fallIsFatal ? 'plummet' : 'fall';
+    }
     return this.vx === 0 ? 'stand' : 'walk';
+  }
+
+  /**
+   * True once the drop in progress is already long enough to kill on landing.
+   *
+   * The same comparison the landing itself makes, so the warning can never
+   * disagree with the outcome. The only way out from here is a rope, which
+   * catching resets the fall — and which this therefore stops reporting.
+   */
+  get fallIsFatal(): boolean {
+    return !this.onGround && this.ropeGrip === null && this.fallDistance > PLAYER.fatalFallDistance;
   }
 
   /** Frame index for the walk cycle, which only advances while actually walking. */
@@ -144,6 +160,7 @@ export class Player {
       leftRoom: null,
       died: null,
       landed: false,
+      landedFrom: 0,
       jumped: false,
       floorsCollapsed: moved.collapsed.length,
       flippedSwitch: false,
@@ -260,7 +277,10 @@ export class Player {
       result.died = 'hazard';
     }
 
-    if (result.landed) this.fallDistance = 0;
+    if (result.landed) {
+      result.landedFrom = this.fallDistance;
+      this.fallDistance = 0;
+    }
 
     return result;
   }
