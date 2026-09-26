@@ -91,6 +91,16 @@
       "cy": 40,
       "radius": 20,
       "speed": 120
+    },
+    {
+      "type": "vent",
+      "id": "boiler-steam",
+      "sprite": "steam",
+      "x": 120,
+      "y": 136,
+      "cells": 2,
+      "period": 2.4,
+      "on": 0.8
     }
   ],
   "items": [

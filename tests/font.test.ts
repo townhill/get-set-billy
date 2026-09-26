@@ -6,6 +6,18 @@ import {
   DOOR_ART,
   DOOR_HEIGHT,
   DOOR_WIDTH,
+  PLAYER_DEAD,
+  PLAYER_FALL,
+  PLAYER_HANG,
+  PLAYER_JUMP,
+  PLAYER_LAND,
+  PLAYER_PLUMMET,
+  PLAYER_STAND,
+  PLAYER_WALK,
+  VENT_GRATE,
+  VENT_JET,
+  VENT_TIP,
+  VENT_WARN,
 } from '../src/assets/sprites';
 import {
   CONVEYOR_ART,
@@ -19,7 +31,7 @@ import {
   TELEPORT_ART,
   WALL_ART,
 } from '../src/assets/tileArt';
-import { TILE_SIZE } from '../src/config';
+import { PLAYER, TILE_SIZE } from '../src/config';
 
 /**
  * The artwork is hand-typed, so these check the shape of it. A row with a
@@ -94,6 +106,40 @@ describe('the artwork', () => {
       for (const frame of def.frames) checkArt(name, frame, def.width, def.height);
       expect(def.frameMs).toBeGreaterThan(0);
     }
+  });
+
+  it('draws every pose of the player at exactly the size of the collision box', () => {
+    const poses = {
+      stand: PLAYER_STAND,
+      walk: PLAYER_WALK,
+      jump: PLAYER_JUMP,
+      fall: PLAYER_FALL,
+      plummet: PLAYER_PLUMMET,
+      land: PLAYER_LAND,
+      hang: PLAYER_HANG,
+      dead: PLAYER_DEAD,
+    };
+    for (const [name, def] of Object.entries(poses)) {
+      expect(def.width, name).toBe(PLAYER.width);
+      expect(def.height, name).toBe(PLAYER.height);
+      def.frames.forEach((frame, i) =>
+        checkArt(`${name} ${i}`, frame, PLAYER.width, PLAYER.height),
+      );
+    }
+  });
+
+  it('keeps the nightcap on while hanging from a rope', () => {
+    // It once came off, and the face turned white, and nobody noticed for a while.
+    const hang = PLAYER_HANG.frames[0].join('');
+    expect(hang).toContain('M');
+    expect(hang).toContain('Y');
+  });
+
+  it('draws every part of a vent at exactly one cell', () => {
+    VENT_JET.forEach((art, i) => checkArt(`vent jet ${i}`, art, TILE_SIZE, TILE_SIZE));
+    VENT_TIP.forEach((art, i) => checkArt(`vent tip ${i}`, art, TILE_SIZE, TILE_SIZE));
+    VENT_WARN.forEach((art, i) => checkArt(`vent warning ${i}`, art, TILE_SIZE, TILE_SIZE));
+    checkArt('vent grating', VENT_GRATE, TILE_SIZE, TILE_SIZE);
   });
 
   it('draws the door at the size the collision box assumes', () => {

@@ -66,6 +66,23 @@ export class GameState {
     return this.collectedItems.size >= total;
   }
 
+  /**
+   * Hands out a spare life if the number of things found has just reached a
+   * multiple of `WORLD.itemsPerSpareLife`. Returns true when it did.
+   *
+   * Call it once for each thing newly collected, and never otherwise: it looks
+   * at the count as it stands, so calling it twice on the same count would pay
+   * out twice. A life earned while already at the most there can be is simply
+   * not given, rather than saved up for later.
+   */
+  awardSpareLife(): boolean {
+    const found = this.collectedItems.size;
+    if (found === 0 || found % WORLD.itemsPerSpareLife !== 0) return false;
+    if (this.lives >= WORLD.maxLives) return false;
+    this.lives += 1;
+    return true;
+  }
+
   /** Removes a life. Returns true if the run is over. */
   loseLife(): boolean {
     this.deaths += 1;

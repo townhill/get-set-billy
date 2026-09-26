@@ -1,4 +1,4 @@
-import type { PaletteKey } from './palette';
+import type { DeepShade, PaletteKey } from './palette';
 
 /**
  * A theme is the colour scheme and tile-shape choice for one kind of room.
@@ -23,6 +23,16 @@ export interface ThemeDef {
   decorTwo: string;
   decorTwoInk: PaletteKey;
 
+  /**
+   * The back wall: a pattern from backdrops.ts, in two deep shades.
+   *
+   * Typed as deep shades rather than any colour on purpose, so a theme cannot
+   * paint its wallpaper in something a hazard might also be painted in.
+   */
+  backdrop: string;
+  backdropInk: DeepShade;
+  backdropShade: DeepShade;
+
   /** Room background, and the inks used for hazards and conveyors. */
   background: PaletteKey;
   hazardInk: PaletteKey;
@@ -44,6 +54,9 @@ export interface ThemeDef {
 }
 
 const base = {
+  backdrop: 'none',
+  backdropInk: 'a',
+  backdropShade: 'a',
   background: 'k',
   hazardInk: 'W',
   liquidInk: 'b',
@@ -58,6 +71,9 @@ const base = {
 export const THEMES: Readonly<Record<string, ThemeDef>> = {
   hall: {
     ...base,
+    backdrop: 'damask',
+    backdropInk: 'o',
+    backdropShade: 'u',
     sting: [0, 4, 7],
     wall: 'panel',
     wallInk: 'r',
@@ -72,6 +88,9 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   library: {
     ...base,
+    backdrop: 'boards',
+    backdropInk: 'u',
+    backdropShade: 'o',
     sting: [0, 3, 7],
     wall: 'shelving',
     wallInk: 'y',
@@ -86,6 +105,9 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   attic: {
     ...base,
+    backdrop: 'boards',
+    backdropInk: 'a',
+    backdropShade: 'u',
     sting: [0, 5, 12],
     wall: 'plank',
     wallInk: 'y',
@@ -100,6 +122,9 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   boiler: {
     ...base,
+    backdrop: 'pipes',
+    backdropInk: 'o',
+    backdropShade: 'u',
     sting: [-12, -8, -5],
     wall: 'riveted',
     wallInk: 'r',
@@ -118,6 +143,9 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   conservatory: {
     ...base,
+    backdrop: 'glass',
+    backdropInk: 't',
+    backdropShade: 'f',
     sting: [2, 7, 11],
     wall: 'glazing',
     wallInk: 'c',
@@ -134,6 +162,9 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   clock: {
     ...base,
+    backdrop: 'stripes',
+    backdropInk: 'u',
+    backdropShade: 'a',
     sting: [0, 6, 12],
     wall: 'panel',
     wallInk: 'y',
@@ -148,6 +179,9 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   corridor: {
     ...base,
+    backdrop: 'bricks',
+    backdropInk: 'n',
+    backdropShade: 'a',
     sting: [0, 2, 4],
     wall: 'brick',
     wallInk: 'b',
@@ -162,6 +196,9 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   laboratory: {
     ...base,
+    backdrop: 'pipes',
+    backdropInk: 'p',
+    backdropShade: 't',
     sting: [1, 6, 10],
     wall: 'riveted',
     wallInk: 'm',
@@ -180,6 +217,9 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   roof: {
     ...base,
+    backdrop: 'sky',
+    backdropInk: 'n',
+    backdropShade: 'a',
     sting: [7, 12, 16],
     wall: 'stone',
     wallInk: 'b',
@@ -194,6 +234,9 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   cellar: {
     ...base,
+    backdrop: 'bricks',
+    backdropInk: 'f',
+    backdropShade: 'a',
     sting: [-12, -9, -5],
     wall: 'rubble',
     wallInk: 'g',
@@ -210,6 +253,9 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   gallery: {
     ...base,
+    backdrop: 'damask',
+    backdropInk: 'p',
+    backdropShade: 'o',
     sting: [0, 4, 9],
     wall: 'panel',
     wallInk: 'm',
@@ -224,6 +270,9 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   kitchen: {
     ...base,
+    backdrop: 'tiles',
+    backdropInk: 't',
+    backdropShade: 'a',
     sting: [0, 5, 9],
     wall: 'chequer',
     wallInk: 'w',
@@ -240,6 +289,9 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   billiards: {
     ...base,
+    backdrop: 'stripes',
+    backdropInk: 'f',
+    backdropShade: 'u',
     sting: [-5, 0, 4],
     wall: 'panel',
     wallInk: 'g',
@@ -254,6 +306,9 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   landing: {
     ...base,
+    backdrop: 'damask',
+    backdropInk: 'n',
+    backdropShade: 't',
     sting: [0, 3, 5],
     wall: 'plank',
     wallInk: 'c',
@@ -268,6 +323,9 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   chimney: {
     ...base,
+    backdrop: 'sky',
+    backdropInk: 'p',
+    backdropShade: 'a',
     sting: [7, 11, 14],
     wall: 'brick',
     wallInk: 'r',
@@ -282,6 +340,9 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   scullery: {
     ...base,
+    backdrop: 'tiles',
+    backdropInk: 'n',
+    backdropShade: 't',
     sting: [-5, 0, 5],
     wall: 'chequer',
     wallInk: 'c',
@@ -300,6 +361,9 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   organ: {
     ...base,
+    backdrop: 'organ',
+    backdropInk: 'u',
+    backdropShade: 'o',
     sting: [0, 7, 12],
     wall: 'panel',
     wallInk: 'y',
@@ -315,6 +379,9 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   bathroom: {
     ...base,
+    backdrop: 'tiles',
+    backdropInk: 'a',
+    backdropShade: 't',
     sting: [4, 9, 12],
     wall: 'chequer',
     wallInk: 'w',
@@ -331,6 +398,9 @@ export const THEMES: Readonly<Record<string, ThemeDef>> = {
   },
   aviary: {
     ...base,
+    backdrop: 'glass',
+    backdropInk: 'f',
+    backdropShade: 't',
     sting: [5, 9, 14],
     wall: 'glazing',
     wallInk: 'g',

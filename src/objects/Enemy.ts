@@ -1,5 +1,6 @@
 import type { Box } from '../systems/CollisionSystem';
-import type { EnemyDef, Point } from '../world/roomTypes';
+import { TILE_SIZE } from '../config';
+import { type EnemyDef, type Point, VENT_WARNING_SECONDS } from '../world/roomTypes';
 import { alongPath, pathPeriod } from './paths';
 
 /**
@@ -50,9 +51,39 @@ export function enemyPeriod(def: EnemyDef): number {
       return (2 * def.arc) / Math.max(1, Math.abs(def.speed));
     case 'waypoint':
       return pathPeriod(def.points, def.speed);
+    case 'vent':
+      return def.period;
     case 'static':
       return 0;
   }
+}
+
+export type VentStage = 'idle' | 'warning' | 'firing';
+
+type VentDef = Extract<EnemyDef, { type: 'vent' }>;
+
+/**
+ * Where a vent is in its cycle: quiet, sputtering, or firing.
+ *
+ * The cycle ends with the firing, so a vent at the moment you walk in is always
+ * quiet — arriving never means arriving into a jet of steam.
+ */
+export function ventStage(def: VentDef, seconds: number): VentStage {
+  if (def.period <= 0) return 'firing';
+  const t = (((seconds + (def.phase ?? 0) * def.period) % def.period) + def.period) % def.period;
+  const firesAt = def.period - def.on;
+  if (t >= firesAt) return 'firing';
+  if (t >= firesAt - VENT_WARNING_SECONDS) return 'warning';
+  return 'idle';
+}
+
+/**
+ * Whether touching this enemy right now would kill you.
+ *
+ * Everything that moves is always deadly. A vent is deadly only while it fires.
+ */
+export function enemyIsLethal(def: EnemyDef, seconds: number): boolean {
+  return def.type !== 'vent' || ventStage(def, seconds) === 'firing';
 }
 
 /** Top-left corner of an enemy at a given moment. */
@@ -99,13 +130,20 @@ export function enemyPosition(def: EnemyDef, seconds: number, size: SpriteSize):
     }
 
     case 'static':
+    case 'vent':
       return { x: def.x, y: def.y };
   }
 }
 
-/** Collision box of an enemy at a given moment. */
+/**
+ * Collision box of an enemy at a given moment.
+ *
+ * A vent's is the whole height of its jet, whatever the size of the sprite it
+ * is drawn with, since the jet is drawn a cell at a time.
+ */
 export function enemyBox(def: EnemyDef, seconds: number, size: SpriteSize): Box {
   const { x, y } = enemyPosition(def, seconds, size);
+  if (def.type === 'vent') return { x, y, width: TILE_SIZE, height: def.cells * TILE_SIZE };
   return { x, y, width: size.width, height: size.height };
 }
 

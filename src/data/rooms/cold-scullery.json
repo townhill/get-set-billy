@@ -78,6 +78,16 @@
       "cy": 64,
       "radius": 20,
       "speed": 55
+    },
+    {
+      "type": "vent",
+      "id": "scullery-steam",
+      "sprite": "steam",
+      "x": 80,
+      "y": 136,
+      "cells": 2,
+      "period": 2.8,
+      "on": 0.9
     }
   ],
   "items": [

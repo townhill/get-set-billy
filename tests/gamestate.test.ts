@@ -13,6 +13,45 @@ describe('a new game', () => {
   });
 });
 
+describe('spare lives', () => {
+  /** Collects `count` more things, calling the award after each, as the game does. */
+  function find(state: GameState, count: number): number {
+    let awarded = 0;
+    for (let i = 0; i < count; i++) {
+      state.collect(`thing-${state.collectedCount}`);
+      if (state.awardSpareLife()) awarded += 1;
+    }
+    return awarded;
+  }
+
+  it('gives one for every so many things found, and not before', () => {
+    const state = new GameState();
+    expect(find(state, WORLD.itemsPerSpareLife - 1)).toBe(0);
+    expect(state.lives).toBe(WORLD.startingLives);
+    expect(find(state, 1)).toBe(1);
+    expect(state.lives).toBe(WORLD.startingLives + 1);
+    expect(find(state, WORLD.itemsPerSpareLife)).toBe(1);
+    expect(state.lives).toBe(WORLD.startingLives + 2);
+  });
+
+  it('never gives one for finding nothing', () => {
+    expect(new GameState().awardSpareLife()).toBe(false);
+  });
+
+  it('never tops the lives up past the most the panel can show', () => {
+    const state = new GameState(WORLD.startRoom, WORLD.maxLives);
+    expect(find(state, WORLD.itemsPerSpareLife)).toBe(0);
+    expect(state.lives).toBe(WORLD.maxLives);
+  });
+
+  it('can earn back a life lost along the way', () => {
+    const state = new GameState();
+    state.loseLife();
+    find(state, WORLD.itemsPerSpareLife);
+    expect(state.lives).toBe(WORLD.startingLives);
+  });
+});
+
 describe('collecting', () => {
   it('counts each thing once, however many times you walk over it', () => {
     const state = new GameState();

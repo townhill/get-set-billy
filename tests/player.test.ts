@@ -270,6 +270,63 @@ describe('dying', () => {
   });
 });
 
+describe('seeing a fatal fall coming', () => {
+  it('does not call an ordinary drop fatal', () => {
+    const room = flatRoom();
+    const player = new Player();
+    player.placeAt(64, 152 - PLAYER.height - 40);
+    for (let i = 0; i < 60; i++) {
+      player.step(STILL, STEP, room);
+      expect(player.fallIsFatal).toBe(false);
+      expect(player.pose).not.toBe('plummet');
+    }
+  });
+
+  it('says so before the landing, for exactly the falls the landing then kills', () => {
+    const room = flatRoom();
+    const player = new Player();
+    player.placeAt(64, 0);
+    let warnedAt = -1;
+    let diedAt = -1;
+    for (let i = 0; i < 90 && diedAt < 0; i++) {
+      const result = player.step(STILL, STEP, room);
+      if (warnedAt < 0 && player.fallIsFatal) warnedAt = i;
+      if (result.died === 'fall') diedAt = i;
+    }
+    expect(warnedAt, 'never warned').toBeGreaterThanOrEqual(0);
+    expect(diedAt, 'never died').toBeGreaterThan(warnedAt);
+  });
+
+  it('switches to the flailing pose while the fall is fatal', () => {
+    const room = flatRoom();
+    const player = new Player();
+    player.placeAt(64, 0);
+    while (!player.fallIsFatal) player.step(STILL, STEP, room);
+    expect(player.fallDistance).toBeGreaterThan(PLAYER.fatalFallDistance);
+    expect(player.pose).toBe('plummet');
+  });
+
+  it('is never fatal while standing', () => {
+    const player = standing(flatRoom());
+    expect(player.fallIsFatal).toBe(false);
+  });
+});
+
+describe('landing', () => {
+  it('reports how far the player fell, on the step they land and on no other', () => {
+    const room = flatRoom();
+    const player = new Player();
+    player.placeAt(64, 152 - PLAYER.height - 40);
+    const results = run(player, room, STILL, 60);
+    const landing = results.find((r) => r.landed);
+    // Measured the way the fatal-fall rule measures it, which stops counting on
+    // the step before touchdown: a little under the forty pixels dropped.
+    expect(landing?.landedFrom).toBeGreaterThan(32);
+    expect(landing?.landedFrom).toBeLessThanOrEqual(40);
+    expect(results.filter((r) => r.landedFrom > 0)).toHaveLength(1);
+  });
+});
+
 describe('leaving the room', () => {
   it('reports the direction when there is a way out', () => {
     const room = flatRoom({ exits: { right: 'somewhere-else' } });

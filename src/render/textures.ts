@@ -4,11 +4,18 @@ import {
   ENEMY_SPRITES,
   ITEM_SPRITES,
   PLAYER_DEAD,
+  PLAYER_FALL,
   PLAYER_HANG,
   PLAYER_JUMP,
+  PLAYER_LAND,
+  PLAYER_PLUMMET,
   PLAYER_STAND,
   PLAYER_WALK,
   type SpriteDef,
+  VENT_GRATE,
+  VENT_KINDS,
+  VENT_TIP,
+  VENT_WARN,
   mirrorArt,
 } from '../assets/sprites';
 import {
@@ -37,7 +44,17 @@ import {
 import { LOCK_COLOURS, type LockColour } from '../world/tiles';
 import { type ThemeDef, THEMES } from '../assets/themes';
 import { PLAY_HEIGHT, PLAY_WIDTH, TILE_SIZE } from '../config';
-import { type Art, artToCanvas, context2d, createCanvas, paintArt, themedResolver } from './pixels';
+import {
+  type Art,
+  artToCanvas,
+  context2d,
+  createCanvas,
+  paintArt,
+  paintField,
+  silhouetteOf,
+  themedResolver,
+} from './pixels';
+import { backdropFor } from '../assets/backdrops';
 import type { Room } from '../world/Room';
 
 /**
@@ -47,9 +64,29 @@ import type { Room } from '../world/Room';
  * pixel at a time into a canvas and handed to Phaser as a texture.
  */
 
-function addCanvasTexture(scene: Phaser.Scene, key: string, canvas: HTMLCanvasElement): void {
+/** How far everything's shadow falls on the wall behind it, down and to the right. */
+export const SHADOW_OFFSET = 2;
+
+/**
+ * Registers a texture, and a black silhouette of it to use as its shadow.
+ *
+ * Every sprite in the game gets one, so anything can cast a shadow without
+ * somebody having remembered to draw one for it. Silhouettes are made here
+ * rather than by tinting at draw time, because tinting is a WebGL nicety and
+ * this has to look the same whichever renderer the browser hands over.
+ */
+function addCanvasTexture(
+  scene: Phaser.Scene,
+  key: string,
+  canvas: HTMLCanvasElement,
+  withShadow = true,
+): void {
   if (scene.textures.exists(key)) scene.textures.remove(key);
   scene.textures.addCanvas(key, canvas);
+  if (!withShadow) return;
+  const shadow = keys.shadow(key);
+  if (scene.textures.exists(shadow)) scene.textures.remove(shadow);
+  scene.textures.addCanvas(shadow, silhouetteOf(canvas));
 }
 
 function ensureArt(scene: Phaser.Scene, key: string, art: Art, ink: Record<string, string>): void {
@@ -79,7 +116,13 @@ export const keys = {
   teleport: (frame: number): string => `tile-teleport-${frame}`,
   hatch: (theme: string): string => `tile-${theme}-hatch`,
   keyItem: (lock: LockColour, frame: number): string => `key-item-${lock}-${frame}`,
+  /** The parts of a vent that are not its jet: the tip, the warning sputter, and the grating. */
+  vent: (kind: string, part: 'tip' | 'warn' | 'grate', frame = 0): string =>
+    `vent-${kind}-${part}-${frame}`,
   room: (id: string): string => `room-${id}`,
+  backdrop: (id: string): string => `backdrop-${id}`,
+  /** The silhouette of any texture built here, for the shadow it casts. */
+  shadow: (key: string): string => `${key}~shadow`,
 };
 
 function paletteInk(...pairs: [string, PaletteKey][]): Record<string, string> {
@@ -104,7 +147,9 @@ function buildPlayer(scene: Phaser.Scene): void {
   buildSprite(scene, 'stand', PLAYER_STAND);
   buildSprite(scene, 'walk', PLAYER_WALK);
   buildSprite(scene, 'jump', PLAYER_JUMP);
-  buildSprite(scene, 'fall', PLAYER_JUMP);
+  buildSprite(scene, 'fall', PLAYER_FALL);
+  buildSprite(scene, 'plummet', PLAYER_PLUMMET);
+  buildSprite(scene, 'land', PLAYER_LAND);
   buildSprite(scene, 'hang', PLAYER_HANG);
   buildSprite(scene, 'dead', PLAYER_DEAD);
 }
@@ -115,6 +160,16 @@ function buildEnemies(scene: Phaser.Scene): void {
       addCanvasTexture(scene, keys.enemy(name, index, 1), artToCanvas(frame));
       addCanvasTexture(scene, keys.enemy(name, index, -1), artToCanvas(mirrorArt(frame)));
     });
+  }
+}
+
+/** The jet is an ordinary enemy sprite; the rest of a vent is built here. */
+function buildVents(scene: Phaser.Scene): void {
+  for (const [kind, ink] of Object.entries(VENT_KINDS)) {
+    const jet = paletteInk(['1', ink.hot as PaletteKey], ['2', ink.edge as PaletteKey]);
+    VENT_TIP.forEach((art, frame) => ensureArt(scene, keys.vent(kind, 'tip', frame), art, jet));
+    VENT_WARN.forEach((art, frame) => ensureArt(scene, keys.vent(kind, 'warn', frame), art, jet));
+    ensureArt(scene, keys.vent(kind, 'grate'), VENT_GRATE, paletteInk(['1', 'W'], ['2', 'w']));
   }
 }
 
@@ -227,6 +282,7 @@ function buildGates(scene: Phaser.Scene): void {
 export function buildAllTextures(scene: Phaser.Scene): void {
   buildPlayer(scene);
   buildEnemies(scene);
+  buildVents(scene);
   buildItems(scene);
   buildDoor(scene);
   buildGates(scene);
@@ -237,33 +293,111 @@ export function buildAllTextures(scene: Phaser.Scene): void {
   }
 }
 
+/** Tiles that are part of the painted room, and so cast a shadow on its back wall. */
+const CASTS_SHADOW = new Set(['#', '=', ',', ':', '^', 'v', '<', '>']);
+
+/** Every art pixel that is not transparent, painted black: a silhouette. */
+const silhouette = (ch: string): string | null => (ch === '.' ? null : '#000000');
+
+/** The bright version of a colour, for the lit top of a wall. Bright colours stay as they are. */
+export function brightInk(key: PaletteKey): PaletteKey {
+  const upper = key.toUpperCase();
+  return upper !== key && upper in PALETTE ? (upper as PaletteKey) : key;
+}
+
+export interface RoomTextures {
+  /** The back wall, fully opaque. */
+  backdrop: string;
+  /** The walls, ledges and decoration, with their shadows, on a clear ground. */
+  scenery: string;
+}
+
 /**
- * Paints a whole room's fixed scenery into one texture.
+ * Paints a room's fixed scenery, as two textures.
  *
  * Only the parts that never change go in here. Conveyors, crumbling floors,
  * liquid and the nastier hazards animate, so they are drawn as sprites on top.
+ *
+ * Two layers rather than one so that the shadows moving things cast can be
+ * slid in between: on the wallpaper, and under the scenery. A shadow then only
+ * ever darkens the wall behind, and a player standing on a floor never takes a
+ * bite out of it.
+ *
+ * The scenery's own shadows are painted before any of the scenery, for the
+ * same reason — and only for things that are there for good, since a
+ * crumbling floor's shadow would outlive the floor.
  */
-export function buildRoomTexture(scene: Phaser.Scene, room: Room, theme: ThemeDef): string {
-  const key = keys.room(room.id);
-  if (scene.textures.exists(key)) return key;
+export function buildRoomTextures(scene: Phaser.Scene, room: Room, theme: ThemeDef): RoomTextures {
+  const result = { backdrop: keys.backdrop(room.id), scenery: keys.room(room.id) };
+  if (scene.textures.exists(result.scenery) && scene.textures.exists(result.backdrop)) {
+    return result;
+  }
+
+  const back = createCanvas(PLAY_WIDTH, PLAY_HEIGHT);
+  const backdrop = backdropFor(theme.backdrop);
+  const backdropInks: Record<string, string | null> = {
+    '1': paletteColour(theme.backdropInk),
+    '2': paletteColour(theme.backdropShade),
+    '.': null,
+  };
+  paintField(
+    context2d(back),
+    PLAY_WIDTH,
+    PLAY_HEIGHT,
+    (x, y) => backdropInks[backdrop(x, y)] ?? null,
+    paletteColour(theme.background) ?? '#000000',
+  );
+  addCanvasTexture(scene, result.backdrop, back, false);
 
   const canvas = createCanvas(PLAY_WIDTH, PLAY_HEIGHT);
   const ctx = context2d(canvas);
-
-  const background = paletteColour(theme.background) ?? '#000000';
-  ctx.fillStyle = background;
-  ctx.fillRect(0, 0, PLAY_WIDTH, PLAY_HEIGHT);
 
   const wall = WALL_ART[theme.wall] ?? WALL_ART.brick;
   const ledge = LEDGE_ART[theme.ledge] ?? LEDGE_ART.ledge;
   const decor = DECOR_ART[theme.decor] ?? DECOR_ART.cobweb;
   const decorTwo = DECOR_ART[theme.decorTwo] ?? DECOR_ART.cobweb;
 
+  const artFor = (char: string): Art | null => {
+    switch (char) {
+      case '#':
+        return wall;
+      case '=':
+        return ledge;
+      case ',':
+        return decor;
+      case ':':
+        return decorTwo;
+      case '^':
+        return SPIKES_UP;
+      case 'v':
+        return SPIKES_DOWN;
+      case '<':
+      case '>':
+        return CONVEYOR_ART[0];
+      default:
+        return null;
+    }
+  };
+
+  room.forEachCell((col, row, char) => {
+    if (!CASTS_SHADOW.has(char)) return;
+    const art = artFor(char);
+    if (art === null) return;
+    paintArt(
+      ctx,
+      art,
+      col * TILE_SIZE + SHADOW_OFFSET,
+      row * TILE_SIZE + SHADOW_OFFSET,
+      silhouette,
+    );
+  });
+
   const wallInk = themedResolver(paletteInk(['1', theme.wallInk], ['2', theme.wallShade]));
   const ledgeInk = themedResolver(paletteInk(['1', theme.ledgeInk], ['2', theme.ledgeShade]));
   const decorInk = themedResolver(paletteInk(['1', theme.decorInk]));
   const decorTwoInk = themedResolver(paletteInk(['1', theme.decorTwoInk]));
   const hazardInk = themedResolver(paletteInk(['1', theme.hazardInk]));
+  const rimLight = paletteColour(brightInk(theme.wallInk)) ?? '#ffffff';
 
   room.forEachCell((col, row, char) => {
     const x = col * TILE_SIZE;
@@ -271,6 +405,12 @@ export function buildRoomTexture(scene: Phaser.Scene, room: Room, theme: ThemeDe
     switch (char) {
       case '#':
         paintArt(ctx, wall, x, y, wallInk);
+        // The top of a wall you can stand on catches the light, which is also
+        // the quickest way to say "you can stand on this".
+        if (row > 0 && room.rawCharAt(col, row - 1) !== '#') {
+          ctx.fillStyle = rimLight;
+          ctx.fillRect(x, y, TILE_SIZE, 1);
+        }
         break;
       case '=':
         paintArt(ctx, ledge, x, y, ledgeInk);
@@ -292,6 +432,6 @@ export function buildRoomTexture(scene: Phaser.Scene, room: Room, theme: ThemeDe
     }
   });
 
-  addCanvasTexture(scene, key, canvas);
-  return key;
+  addCanvasTexture(scene, result.scenery, canvas, false);
+  return result;
 }

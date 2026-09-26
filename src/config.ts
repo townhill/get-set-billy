@@ -83,6 +83,10 @@ export const WORLD = {
   startRoom: 'entrance-hall',
   /** Number of lives a new game begins with. */
   startingLives: 5,
+  /** Every this many things found earns a spare life. */
+  itemsPerSpareLife: 10,
+  /** Lives are never topped up past this, which is also as many as the panel can show. */
+  maxLives: 8,
   /** Length of the death animation before the room resets, in milliseconds. */
   deathDurationMs: 900,
   /** Length of the "you need everything first" door message, in milliseconds. */
@@ -105,6 +109,13 @@ export const WORLD = {
   liftHeight: 8,
   /** How long the room's name stays on screen when you walk in, in milliseconds. */
   roomTitleMs: 1400,
+  /** How long the player stays crouched after landing from a real fall, in milliseconds. */
+  landSquashMs: 90,
+  /** A landing from further than this counts as a real fall: dust, a thud and a crouch. */
+  landThudDistance: 20,
+  /** How often an idle player blinks, and for how long, in milliseconds. */
+  blinkEveryMs: 3200,
+  blinkForMs: 140,
 } as const;
 
 export const FLASH = {

@@ -2,6 +2,14 @@ import { ROOM_COLS, ROOM_ROWS } from '../config';
 import { LOCK_COLOURS, type LockColour, isKnownTile } from './tiles';
 import { MIN_GRIP } from '../objects/Rope';
 
+/**
+ * How long a vent sputters before it fires, in seconds.
+ *
+ * Fixed for the whole house rather than per vent, so the warning means the
+ * same thing everywhere: once it starts, you have exactly this long.
+ */
+export const VENT_WARNING_SECONDS = 0.5;
+
 /** The four ways out of a room. */
 export type Direction = 'left' | 'right' | 'up' | 'down';
 
@@ -108,6 +116,29 @@ export type EnemyDef =
       sprite: string;
       x: number;
       y: number;
+    }
+  | {
+      /**
+       * A jet of steam or flame from a grating in the floor, which fires on a
+       * clock like everything else: idle, a warning sputter, then lethal.
+       *
+       * The only resident that is sometimes harmless, and the one that asks
+       * for timing rather than for dodging. It never moves.
+       */
+      type: 'vent';
+      id: string;
+      /** 'steam' or 'flame'. */
+      sprite: string;
+      /** Top-left of the jet at its full height. The grating is at the bottom. */
+      x: number;
+      y: number;
+      /** How many cells tall the jet is when it fires. */
+      cells: number;
+      /** Seconds from the start of one firing to the start of the next. */
+      period: number;
+      /** Seconds it spends firing, at the end of each period. */
+      on: number;
+      phase?: number;
     };
 
 export type EnemyKind = EnemyDef['type'];
@@ -257,6 +288,16 @@ export function validateRoomShape(data: RoomData): string[] {
   for (const enemy of data.enemies ?? []) {
     if (enemy.type === 'waypoint' && enemy.points.length < 2) {
       issues.push(`enemy "${enemy.id}" needs at least two waypoints to go anywhere`);
+    }
+    if (enemy.type === 'vent') {
+      if (enemy.cells < 1) issues.push(`vent "${enemy.id}" needs to be at least one cell tall`);
+      if (enemy.on <= 0) issues.push(`vent "${enemy.id}" never fires`);
+      if (enemy.period < enemy.on + VENT_WARNING_SECONDS) {
+        issues.push(`vent "${enemy.id}" has no quiet spell: its period is too short`);
+      }
+      if (enemy.x % 8 !== 0 || enemy.y % 8 !== 0) {
+        issues.push(`vent "${enemy.id}" is not on a cell boundary`);
+      }
     }
   }
 

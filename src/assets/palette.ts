@@ -28,9 +28,31 @@ export const PALETTE = {
   C: '#40e8ff', // bright cyan
   Y: '#ffe040', // bright yellow
   W: '#ffffff', // bright white
+
+  // Deep shades, for the wallpaper behind a room and for nothing else.
+  //
+  // Nothing you can stand on, pick up or be killed by is ever drawn in one of
+  // these (there is a test), which is what lets a room have a back wall at all
+  // without anything in front of it getting harder to see.
+  n: '#0e1640', // deep blue: navy
+  o: '#3a0c14', // deep red: oxblood
+  p: '#300c38', // deep magenta: plum
+  f: '#0c2c16', // deep green: forest
+  t: '#082c32', // deep cyan: teal
+  u: '#302608', // deep yellow: umber
+  a: '#242424', // deep grey: ash
 } as const;
 
 export type PaletteKey = keyof typeof PALETTE;
+
+/** The backdrop-only shades. Never an ink for anything in the foreground. */
+export const DEEP_SHADES = ['n', 'o', 'p', 'f', 't', 'u', 'a'] as const;
+
+export type DeepShade = (typeof DEEP_SHADES)[number];
+
+export function isDeepShade(key: string): key is DeepShade {
+  return (DEEP_SHADES as readonly string[]).includes(key);
+}
 
 /** The colours items flash through while waiting to be picked up. */
 export const ITEM_FLASH_COLOURS: PaletteKey[] = ['Y', 'C', 'M', 'G', 'W', 'R'];

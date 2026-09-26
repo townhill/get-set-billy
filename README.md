@@ -123,7 +123,13 @@ Notes on how it feels, all of which are deliberate:
 - **A jump clears four tiles (32 px) but not five.** The whole house is laid out
   around that number, and there is a test that pins it.
 - **Falling too far is fatal** — more than 72 px without landing. A fall that
-  carries you down into the room below keeps counting.
+  carries you down into the room below keeps counting. The moment a fall
+  becomes fatal you are told: the player starts to windmill and a whistle
+  starts to drop, so the death at the bottom is announced rather than sprung.
+  (A rope caught on the way down still saves you, and the flailing stops.)
+- **Something that kills you says what it was**, in the status panel. "THAT WAS
+  FURTHER THAN IT LOOKED" teaches the fatal fall better than any sound effect.
+- **Every tenth thing you find is worth a spare life**, up to eight.
 - `R` costs a life on purpose: it is the way out of a spot you cannot escape,
   not a free retry.
 - **A rope carries you; it never flings you.** Letting go leaves you exactly
@@ -175,11 +181,13 @@ src/
 
   state/
     GameState.ts           Room, lives, collected items, rooms seen, clock
+    obituaries.ts          What the status panel says killed you
 
   render/
     pixels.ts              Plot art strings onto a canvas
     textures.ts            Build every texture at boot
     PixelText.ts           Text in the project's own typeface
+    particles.ts           Dust, sparks and debris (no Phaser)
 
   ui/
     Hud.ts                 The status panel
@@ -187,10 +195,11 @@ src/
     DebugOverlay.ts        Collision boxes and numbers, when asked for
 
   assets/
-    palette.ts             Sixteen colours and black
+    palette.ts             Sixteen colours and black, and seven deep shades for back walls
     font.ts                An original 5x7 typeface
-    sprites.ts             Player, enemies, collectables, the door
+    sprites.ts             Player, enemies, vents, collectables, the door
     tileArt.ts             Walls, ledges, decoration, hazards
+    backdrops.ts           The wallpaper behind each room, as functions of position
     themes.ts              Which shapes and colours each kind of room uses
 
   data/rooms/*.json        The house itself
@@ -201,7 +210,7 @@ src/
 Phaser draws things and runs the loop. It does not decide anything.
 
 All the rules — movement, collision, enemy paths, room structure, game state,
-saving — live in modules that import no Phaser at all. That is why 464 tests can
+saving — live in modules that import no Phaser at all. That is why 682 tests can
 run in a plain Node environment with no canvas and no WebGL, and it is why
 `GameScene` is mostly sequencing rather than logic.
 
@@ -291,7 +300,23 @@ resets the room clock to zero and every resident snaps back to exactly where it
 started. That is what made the enemies in these games learnable, and learnable
 is the whole game.
 
-Five behaviours: `patrol-h`, `patrol-v`, `circle`, `pendulum` and `static`.
+Eight behaviours: `patrol-h`, `patrol-v`, `circle`, `pendulum`, `waypoint`,
+`figure-eight`, `static` and `vent`.
+
+A **vent** is the one resident that is sometimes harmless. It is a grating in
+the floor that fires a jet of steam or flame on the room clock: quiet, then half
+a second of sputtering, then lethal for as long as it says. The warning is the
+same length everywhere, so once it starts you always know exactly how long you
+have. It asks for timing rather than dodging, and it is still nothing but a pure
+function of how long you have been in the room:
+
+```ts
+ventStage(def, seconds) -> 'idle' | 'warning' | 'firing'
+```
+
+The cycle ends with the firing, so an unshifted vent is always quiet the moment
+you walk in, and the tests make sure no vent in the house is firing on arrival
+whatever its phase.
 
 ### Game state
 
@@ -309,6 +334,11 @@ interface GameState {
 
 One object, held by `GameScene`, untouched by room changes. Collected items are
 global and keyed by id, so an item stays collected when you come back.
+
+Every tenth thing found earns a spare life, up to eight, which is as many heads
+as the status panel has room for. The count only ever goes up, so each multiple
+of ten is reached once and paid once; a life earned while already at eight is
+not saved up for later.
 
 `entrySpawn` records the edge you came in through, so dying returns you to where
 you entered the room rather than to some fixed point.
@@ -367,9 +397,41 @@ grid of `<rect>` elements with `shape-rendering="crispEdges"`, showing the
 player's head in its nightcap. It scales up crisply to whatever size a browser
 asks for, and it is still just text you can edit.
 
-Each room's fixed scenery is painted once into a single 256×160 texture. Only
-the parts that animate — conveyors, crumbling floors, liquid — are separate
-sprites.
+Each room's fixed scenery is painted once, into two 256×160 textures: the back
+wall, and everything in front of it. Only the parts that animate — conveyors,
+crumbling floors, liquid — are separate sprites.
+
+**Back walls.** Every room used to be painted on plain black, which is
+authentic and also why every room looked like every other room with the walls
+recoloured. Now each theme has a backdrop from `assets/backdrops.ts` — flocked
+wallpaper in the hall, boards in the library, pipework in the boiler room, a
+night sky that lightens towards the horizon on the roof, organ pipes in the organ
+loft. A backdrop is a pure function of a pixel's position, which is how a
+gradient can be made of whole pixels: an ordered dither.
+
+It is painted in **deep shades**, seven colours kept apart from the sixteen and
+reserved for back walls. Nothing you can stand on, pick up or be killed by is
+ever drawn in one, and there is a test for that, which is the whole of why a
+busy wallpaper can never hide a ledge or a hazard.
+
+**Shadows.** Everything casts one, two pixels down and to the right: walls,
+ledges, the player, the residents, the collectables, even the ropes. A shadow is
+a black silhouette of the sprite, made at boot rather than by tinting, so it
+looks the same on whichever renderer the browser provides. Shadows sit between
+the back wall and the scenery, so they only ever fall on the wall behind — a
+player standing on a floor never takes a bite out of it. And the top of a wall
+you can stand on catches the light.
+
+**Specks.** Jumps and landings kick up dust, pickups sparkle, crumbling floors
+drop debris, opened gates throw sparks, and the player comes apart in their own
+colours when something gets them. `render/particles.ts` imports no Phaser and
+is tested like the rules are, but nothing in it is read by the rules: it is the
+one place in the game that is allowed a random number generator, and it is
+seeded anyway.
+
+**The player** has a pose for going up and another for coming down, a crouch
+for a moment after a real landing, a blink now and then while standing about,
+and the windmill for a fall that has gone too far.
 
 The game runs at a logical 256×192 (a 256×160 playfield plus a 32-pixel status
 panel) and is scaled up by a whole number of pixels to fit the window, so every
@@ -389,6 +451,9 @@ different colours from each other, on purpose.
 Each theme has three notes of its own, played as you walk in — the roof gets the
 highest in the house, the cellar the lowest. A theme is what a room is like, and
 what a room is like includes what it sounds like when the door shuts behind you.
+
+A fatal fall whistles on the way down. A spare life chimes. A real landing
+thuds.
 
 Every sound is a square wave generated on the spot with the Web Audio API. There
 are no audio files, so there is nothing that can fail to load. If the browser has
@@ -555,7 +620,9 @@ real movement model. If it says a room is broken, it is broken.
 
 `id` must be unique across the whole house. `sprite` must be one of the names in
 `ENEMY_SPRITES` (`bowler`, `teapot`, `fork`, `eyeball`, `ghost`, `wasp`, `book`,
-`flask`, `cog`, `moth`, `duck`, `mouse`, `candle`, `spark`, `fern`). All are 8×8.
+`flask`, `cog`, `moth`, `duck`, `mouse`, `candle`, `spark`, `fern`, and for vents
+`steam` and `flame`). All are 8×8. Every sprite needs a line in
+`state/obituaries.ts` too, and the tests will say so if one is missing.
 
 | `type`         | Fields                                           | Behaviour                                           |
 | -------------- | ------------------------------------------------ | --------------------------------------------------- |
@@ -566,9 +633,15 @@ real movement model. If it says a room is broken, it is broken.
 | `waypoint`     | `points`, `speed`, `phase?`                      | Walks a closed loop of points at `speed` px/s       |
 | `figure-eight` | `cx`, `cy`, `width`, `height`, `speed`, `phase?` | A 1:2 Lissajous: once across for twice up and down  |
 | `static`       | `x`, `y`                                         | Sits there being lethal                             |
+| `vent`         | `x`, `y`, `cells`, `period`, `on`, `phase?`      | Fires for `on` seconds at the end of each `period`  |
 
 `phase` is 0–1 and shifts an enemy along its cycle, which is how you get two
 enemies on the same path to stay out of step.
+
+A vent's `x`, `y` is the top of its jet, and the grating is at the bottom, so
+`y + cells * 8` must be a floor. It must leave at least a second between
+firings, and must not be firing the moment you walk in; `tests/vent.test.ts`
+checks every vent in the house for both.
 
 Coordinates are the sprite's top-left, except `circle`, `pendulum` and
 `figure-eight`, where `cx`/`cy` is the centre of the path. A `waypoint` path
@@ -769,8 +842,9 @@ Pick one of the nineteen in `src/assets/themes.ts` — `hall`, `library`, `attic
 `boiler`, `conservatory`, `clock`, `corridor`, `laboratory`, `roof`, `cellar`,
 `gallery`, `kitchen`, `billiards`, `landing`, `chimney`, `scullery`, `organ`,
 `bathroom`, `aviary` — or add your own. A theme chooses
-the wall and ledge shapes, the two decorative shapes, and the inks for all of
-them.
+the wall and ledge shapes, the two decorative shapes, the backdrop, and the inks
+for all of them. The backdrop's two inks must be deep shades, and nothing else
+in a theme may be.
 
 ### 8. Check it
 
@@ -793,7 +867,7 @@ room. A broken room fails the build.
 npm test
 ```
 
-623 tests, in a plain Node environment — no browser, no canvas, no Phaser.
+682 tests, in a plain Node environment — no browser, no canvas, no Phaser.
 
 | File                         | Covers                                                                                                                                                                  |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -808,6 +882,9 @@ npm test
 | `tests/map.test.ts`          | That every room gets a cell on the map, on screen, in the right place                                                                                                   |
 | `tests/input.test.ts`        | What may be rebound and what may not, that a change sticks, and that a corrupt binding falls back rather than making an action unpressable                              |
 | `tests/font.test.ts`         | Every glyph and every piece of artwork is the size it claims                                                                                                            |
+| `tests/vent.test.ts`         | Vents: when they are quiet, sputtering and firing, that they check out, and that every vent in the house stands on a floor and gives you time to get past               |
+| `tests/graphics.test.ts`     | That no foreground ink is a backdrop shade, that every backdrop draws, the progress line, and that every death has something to say that fits the panel                 |
+| `tests/particles.test.ts`    | Bursts and specks drawing in: counts, colours, a limit, and the same seed giving the same burst                                                                         |
 
 The tests are there to catch real mistakes — a room you cannot get out of, a
 jump that no longer reaches, a save that crashes the title screen — not to
